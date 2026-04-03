@@ -1,6 +1,6 @@
 <?php
 // Include the database connection file
-include('solar_dashboard.php');
+include('../database/dbcon.php');
 
 // If the previous line didn't die(), the connection was successful.
 // Display a success message.

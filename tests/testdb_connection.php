@@ -1,7 +1,7 @@
 <?php
 // Include the database connection file.
 // This is the file that contains your PDO connection logic.
-include('dbcon.php');
+include('../database/dbcon.php');
 ?>
 <!DOCTYPE html>
 <html lang="en">

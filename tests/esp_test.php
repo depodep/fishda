@@ -4,7 +4,7 @@
 //  Open this in browser: http://YOUR_IP/fish_drying/esp_test.php
 //  DELETE this file after testing!
 // ============================================================
-require_once 'dbcon.php';
+require_once '../database/dbcon.php';
 
 // ── Handle manual test POST (simulate ESP8266) ──
 $manualResult = null;

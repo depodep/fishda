@@ -1,6 +1,6 @@
 <?php
 // Include the database connection file
-include 'dbcon.php';
+include '../database/dbcon.php';
 
 // If the connection was successful, this message will display.
 echo "<h1>Connection Successful!</h1>";

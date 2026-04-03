@@ -10,7 +10,7 @@ if (session_status() === PHP_SESSION_NONE) {
     ]);
     session_start();
 }
-include('dbcon.php');
+include('database/dbcon.php');
 
 // ─── LOGIN HANDLER ───────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'login') {
@@ -53,7 +53,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'login
         $_SESSION['model_name']  = $proto->model_name;
         $_SESSION['given_code']  = $proto->given_code;
         $basePath = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '')), '/');
-        $redirectPath = ($basePath !== '' ? $basePath : '') . '/users_dashboard.php';
+        $redirectPath = ($basePath !== '' ? $basePath : '') . '/admin/users_dashboard.php';
         session_write_close();
         echo json_encode([
             'status' => 'success',
@@ -139,7 +139,9 @@ body {
 .page-wrap {
     position: relative; z-index: 10;
     display: flex;
-    width: 100vw; min-height: 100vh;
+    width: 100vw; height: 100vh;
+    max-height: 100vh;
+    overflow: hidden;
 }
 
 /* ════════════════════════════
@@ -150,9 +152,10 @@ body {
     display: flex;
     flex-direction: column;
     justify-content: center;
-    padding: 60px 70px;
+    padding: 30px 40px;
     border-right: 1px solid var(--border);
     position: relative;
+    overflow-y: auto;
 }
 
 /* Top badge */
@@ -162,11 +165,11 @@ body {
     border: 1px solid rgba(0,212,255,0.25);
     color: var(--accent);
     font-family: 'Space Mono', monospace;
-    font-size: 0.7rem;
+    font-size: 0.6rem;
     letter-spacing: 0.12em;
-    padding: 6px 14px;
+    padding: 4px 12px;
     border-radius: 40px;
-    margin-bottom: 30px;
+    margin-bottom: 15px;
     width: fit-content;
 }
 .sys-badge span.dot {
@@ -178,42 +181,42 @@ body {
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
 
 .sys-title {
-    font-size: 2.8rem;
+    font-size: 2.2rem;
     font-weight: 800;
     color: #fff;
-    line-height: 1.15;
-    margin-bottom: 10px;
+    line-height: 1.1;
+    margin-bottom: 8px;
     letter-spacing: -0.02em;
 }
 .sys-title span { color: var(--accent); }
 
 .sys-sub {
     font-family: 'Space Mono', monospace;
-    font-size: 0.72rem;
+    font-size: 0.65rem;
     color: var(--accent2);
     letter-spacing: 0.14em;
-    margin-bottom: 28px;
+    margin-bottom: 18px;
 }
 
 .sys-desc {
     color: rgba(220,240,255,0.65);
-    font-size: 0.95rem;
-    line-height: 1.75;
+    font-size: 0.85rem;
+    line-height: 1.6;
     max-width: 440px;
-    margin-bottom: 36px;
+    margin-bottom: 20px;
 }
 
 /* Feature chips */
 .feature-list {
-    display: flex; flex-direction: column; gap: 12px;
-    margin-bottom: 40px;
+    display: flex; flex-direction: column; gap: 8px;
+    margin-bottom: 25px;
 }
 .feature-item {
-    display: flex; align-items: center; gap: 14px;
+    display: flex; align-items: center; gap: 10px;
     background: rgba(0,212,255,0.05);
     border: 1px solid rgba(0,212,255,0.12);
-    border-radius: 10px;
-    padding: 12px 18px;
+    border-radius: 8px;
+    padding: 8px 14px;
     transition: border-color .2s, background .2s;
 }
 .feature-item:hover {
@@ -221,23 +224,23 @@ body {
     background: rgba(0,212,255,0.09);
 }
 .feature-icon {
-    width: 36px; height: 36px;
-    border-radius: 8px;
+    width: 28px; height: 28px;
+    border-radius: 6px;
     background: rgba(0,212,255,0.12);
     display: flex; align-items: center; justify-content: center;
     color: var(--accent);
-    font-size: 0.9rem;
+    font-size: 0.8rem;
     flex-shrink: 0;
 }
 .feature-text strong {
     display: block;
     color: #e0f0ff;
-    font-size: 0.88rem;
-    margin-bottom: 2px;
+    font-size: 0.8rem;
+    margin-bottom: 1px;
 }
 .feature-text span {
     color: var(--muted);
-    font-size: 0.75rem;
+    font-size: 0.7rem;
     font-family: 'Space Mono', monospace;
 }
 
@@ -245,46 +248,46 @@ body {
 .inquiry-box {
     background: rgba(255,209,102,0.06);
     border: 1px solid rgba(255,209,102,0.22);
-    border-radius: 14px;
-    padding: 20px 22px;
+    border-radius: 12px;
+    padding: 16px 18px;
     max-width: 480px;
 }
 .inquiry-title {
     color: var(--gold);
-    font-size: 0.82rem;
+    font-size: 0.75rem;
     font-weight: 700;
     letter-spacing: 0.1em;
     text-transform: uppercase;
-    margin-bottom: 12px;
-    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 8px;
+    display: flex; align-items: center; gap: 6px;
 }
 .inquiry-row {
-    display: flex; align-items: flex-start; gap: 10px;
-    margin-bottom: 10px;
+    display: flex; align-items: flex-start; gap: 8px;
+    margin-bottom: 6px;
 }
 .inquiry-row:last-child { margin-bottom: 0; }
 .inq-icon {
     color: var(--gold);
-    font-size: 0.85rem;
-    margin-top: 2px;
+    font-size: 0.75rem;
+    margin-top: 1px;
     flex-shrink: 0;
-    width: 18px; text-align: center;
+    width: 16px; text-align: center;
 }
 .inq-text {
     color: rgba(255,230,150,0.8);
-    font-size: 0.83rem;
-    line-height: 1.6;
+    font-size: 0.75rem;
+    line-height: 1.5;
 }
 .inq-text strong {
     color: var(--gold);
     display: block;
-    font-size: 0.75rem;
+    font-size: 0.7rem;
     letter-spacing: 0.06em;
-    margin-bottom: 2px;
+    margin-bottom: 1px;
 }
 .inq-contact {
     font-family: 'Space Mono', monospace;
-    font-size: 0.88rem;
+    font-size: 0.8rem;
     color: var(--accent2);
     font-weight: 700;
     letter-spacing: 0.05em;
@@ -294,24 +297,24 @@ body {
    RIGHT — LOGIN PANEL
 ════════════════════════════ */
 .login-side {
-    width: 480px;
+    width: 420px;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 50px 44px;
+    padding: 30px 30px;
 }
 
 .login-card {
     width: 100%;
     background: var(--panel);
     border: 1px solid var(--border);
-    border-radius: 22px;
-    padding: 38px 36px 32px;
+    border-radius: 18px;
+    padding: 28px 26px 24px;
     backdrop-filter: blur(22px);
     box-shadow:
         0 0 0 1px rgba(0,212,255,0.06),
-        0 24px 64px rgba(0,0,0,0.7),
+        0 20px 50px rgba(0,0,0,0.7),
         inset 0 1px 0 rgba(255,255,255,0.05);
     position: relative;
     overflow: hidden;
@@ -334,25 +337,25 @@ body {
 
 .login-head {
     text-align: center;
-    margin-bottom: 30px;
+    margin-bottom: 20px;
 }
 
 /* Circuit logo */
 .circuit-icon {
-    width: 64px; height: 64px;
+    width: 50px; height: 50px;
     background: rgba(0,212,255,0.08);
     border: 1px solid rgba(0,212,255,0.25);
     border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
-    margin: 0 auto 16px;
-    font-size: 1.5rem;
+    margin: 0 auto 12px;
+    font-size: 1.2rem;
     color: var(--accent);
-    box-shadow: 0 0 28px rgba(0,212,255,0.15);
+    box-shadow: 0 0 20px rgba(0,212,255,0.15);
     position: relative;
 }
 .circuit-icon::after {
     content: '';
-    position: absolute; inset: -5px;
+    position: absolute; inset: -4px;
     border-radius: 50%;
     border: 1px dashed rgba(0,212,255,0.2);
     animation: spin 10s linear infinite;
@@ -360,48 +363,48 @@ body {
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .login-head h2 {
-    font-size: 1.35rem;
+    font-size: 1.2rem;
     font-weight: 800;
     color: #fff;
-    margin-bottom: 4px;
+    margin-bottom: 3px;
 }
 .login-head p {
     font-family: 'Space Mono', monospace;
-    font-size: 0.68rem;
+    font-size: 0.6rem;
     color: var(--muted);
     letter-spacing: 0.1em;
 }
 
 /* Form fields */
-.f-group { margin-bottom: 18px; }
+.f-group { margin-bottom: 14px; }
 .f-label {
     display: block;
-    font-size: 0.72rem;
+    font-size: 0.68rem;
     font-weight: 700;
     letter-spacing: 0.1em;
     color: rgba(0,212,255,0.8);
     text-transform: uppercase;
-    margin-bottom: 7px;
+    margin-bottom: 5px;
 }
 .f-wrap {
     position: relative;
 }
 .f-icon {
-    position: absolute; left: 14px; top: 50%;
+    position: absolute; left: 12px; top: 50%;
     transform: translateY(-50%);
     color: rgba(0,212,255,0.45);
-    font-size: 0.85rem;
+    font-size: 0.8rem;
     pointer-events: none;
 }
 .f-input {
     width: 100%;
     background: rgba(0,212,255,0.04);
     border: 1px solid rgba(0,212,255,0.18);
-    border-radius: 10px;
+    border-radius: 8px;
     color: #e8f4ff;
     font-family: 'Space Mono', monospace;
-    font-size: 0.88rem;
-    padding: 12px 14px 12px 40px;
+    font-size: 0.82rem;
+    padding: 10px 12px 10px 36px;
     outline: none;
     transition: border-color .2s, box-shadow .2s, background .2s;
     letter-spacing: 0.04em;
@@ -410,15 +413,15 @@ body {
 .f-input:focus {
     border-color: var(--accent);
     background: rgba(0,212,255,0.07);
-    box-shadow: 0 0 0 3px rgba(0,212,255,0.1);
+    box-shadow: 0 0 0 2px rgba(0,212,255,0.1);
 }
 
 /* Example hint */
 .f-hint {
     font-family: 'Space Mono', monospace;
-    font-size: 0.63rem;
+    font-size: 0.6rem;
     color: rgba(0,212,255,0.4);
-    margin-top: 5px;
+    margin-top: 3px;
     padding-left: 2px;
 }
 
@@ -426,26 +429,26 @@ body {
 .f-divider {
     border: none;
     border-top: 1px solid var(--border);
-    margin: 22px 0 18px;
+    margin: 16px 0 14px;
 }
 
 /* Submit button */
 .btn-access {
     width: 100%;
-    padding: 13px;
+    padding: 11px;
     border: none;
-    border-radius: 10px;
+    border-radius: 8px;
     background: linear-gradient(135deg, #007ec4 0%, #00b8d4 50%, #00c9a0 100%);
     color: #fff;
     font-family: 'Syne', sans-serif;
-    font-size: 0.9rem;
+    font-size: 0.85rem;
     font-weight: 700;
     letter-spacing: 0.1em;
     cursor: pointer;
     position: relative;
     overflow: hidden;
     transition: transform .15s, box-shadow .15s;
-    box-shadow: 0 4px 20px rgba(0,180,200,0.3);
+    box-shadow: 0 3px 16px rgba(0,180,200,0.3);
 }
 .btn-access::after {
     content: '';
@@ -454,15 +457,15 @@ body {
     transform: translateX(-100%);
     transition: transform .5s;
 }
-.btn-access:hover { transform: translateY(-1px); box-shadow: 0 6px 28px rgba(0,200,220,0.4); }
+.btn-access:hover { transform: translateY(-1px); box-shadow: 0 5px 24px rgba(0,200,220,0.4); }
 .btn-access:hover::after { transform: translateX(100%); }
 .btn-access:active { transform: translateY(0); }
 
 /* Footer note */
 .card-footer-note {
     text-align: center;
-    margin-top: 22px;
-    font-size: 0.7rem;
+    margin-top: 16px;
+    font-size: 0.65rem;
     color: var(--muted);
     font-family: 'Space Mono', monospace;
     line-height: 1.7;
@@ -487,10 +490,18 @@ body {
 
 /* ── RESPONSIVE ── */
 @media (max-width: 960px) {
-    .page-wrap   { flex-direction: column; }
-    .info-side   { padding: 50px 30px; border-right: none; border-bottom: 1px solid var(--border); }
-    .login-side  { width: 100%; padding: 40px 24px; }
-    .sys-title   { font-size: 2rem; }
+    .page-wrap   { flex-direction: column; height: auto; max-height: none; }
+    .info-side   { padding: 25px 20px; border-right: none; border-bottom: 1px solid var(--border); }
+    .login-side  { width: 100%; padding: 25px 20px; }
+    .sys-title   { font-size: 1.8rem; }
+}
+@media (max-height: 700px) {
+    .info-side   { padding: 20px 30px; }
+    .login-side  { padding: 20px 25px; }
+    .sys-title   { font-size: 1.9rem; }
+    .sys-desc    { font-size: 0.8rem; margin-bottom: 15px; }
+    .feature-list { margin-bottom: 20px; }
+    .inquiry-box { padding: 12px 15px; }
 }
 </style>
 </head>
@@ -629,7 +640,7 @@ body {
                     Login Prototype
                 </button>
                 <br>
-                <a href="admin_login.php">Login as Admin</a>
+                <a href="auth/admin_login.php">Login as Admin</a>
             </form>
 
             <div class="card-footer-note">
