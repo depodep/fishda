@@ -40,9 +40,18 @@ try {
     // Always update the live cache — this is what dashboard displays
     $dbh->prepare(
         "UPDATE live_sensor_cache 
-         SET temperature = :t, humidity = :h, timestamp = NOW() 
+         SET temperature = :t, humidity = :h, 
+             fan1_state = :f1, fan2_state = :f2, 
+             heater1_state = :h1, heater2_state = :h2, 
+             exhaust_state = :e, phase = :p, 
+             timestamp = NOW() 
          WHERE id = 1"
-    )->execute([':t' => $temp, ':h' => $humidity]);
+    )->execute([
+        ':t' => $temp, ':h' => $humidity,
+        ':f1' => $fan1_state, ':f2' => $fan2_state,
+        ':h1' => $heater1_state, ':h2' => $heater2_state,
+        ':e' => $exhaust_state, ':p' => $phase
+    ]);
 } catch (Exception $e) {
     // Non-fatal — continue to check session
 }
@@ -144,6 +153,13 @@ $UNDERHEAT_THRESHOLD = $target_temp - 1;
 $heater_state  = 0;
 $exhaust_state = 0;
 $fan_state     = 0;
+
+// Dual device variables
+$heater1_state = 0;
+$heater2_state = 0;
+$fan1_state    = 0;
+$fan2_state    = 0;
+
 $phase         = 'Idle';
 $alert         = null;
 $auto_stopped  = false;
@@ -160,107 +176,130 @@ if ($temp >= $AUTOSTOP_THRESHOLD) {
 
     _saveRecord($dbh, $sid, 'AutoStopped');
 
-    $phase = 'Exhaust'; $exhaust_state = 1; $auto_stopped = true; $command = 'STOP';
+    $phase = 'Exhaust'; 
+    $exhaust_state = 1; 
+    // Turn off all heating devices immediately
+    $fan1_state = 0; $fan2_state = 0;
+    $heater1_state = 0; $heater2_state = 0;
+    $auto_stopped = true; 
+    $command = 'STOP';
     $alert = [
         'level'   => 'emergency',
         'title'   => 'EMERGENCY AUTO-STOP',
         'message' => "Temp {$temp}°C exceeded safety limit! System stopped.",
     ];
 
-} elseif ($temp >= $CRITICAL_THRESHOLD) {
-    // Critical overheat — exhaust only, fan OFF
-    $exhaust_state = 1; $phase = 'Exhaust';
+ } elseif ($temp >= $CRITICAL_THRESHOLD) {
+    // Critical overheat — exhaust only, all heating devices OFF
+    $exhaust_state = 1; 
+    $fan1_state = 0; $fan2_state = 0;
+    $heater1_state = 0; $heater2_state = 0;
+    $phase = 'Exhaust';
     $alert = ['level' => 'critical', 'title' => 'CRITICAL OVERHEAT', 'message' => "Temp {$temp}°C is critical!"];
 
 } elseif ($temp >= $OVERHEAT_THRESHOLD) {
-    // Mild overheat — exhaust, fan OFF
-    $exhaust_state = 1; $phase = 'Exhaust';
+    // Mild overheat — exhaust, fans OFF
+    $exhaust_state = 1; 
+    $fan1_state = 0; $fan2_state = 0;
+    $heater1_state = 0; $heater2_state = 0;
+    $phase = 'Exhaust';
     $alert = ['level' => 'warning', 'title' => 'Overheating', 'message' => "Temp {$temp}°C exceeds target {$target_temp}°C."];
 
 } elseif ($temp <= $UNDERHEAT_THRESHOLD) {
-    // ── HEATING: fan is the heat source → FAN ON ──────────────
-    $fan_state = 1;   // Fan generates the heat
-    $heater_state = 0;
+    // ── HEATING: Both fans + heaters ON for maximum heat ──────
+    $fan1_state = 1; $fan2_state = 1;     // Both fans for circulation
+    $heater1_state = 1; $heater2_state = 1; // Both heaters for heat
+    $exhaust_state = 0;
     $phase = 'Heating';
 
 } else {
-    // Temperature in target range — fan still on for circulation/drying
-    // (fan provides gentle airflow while at target temp)
-    $fan_state = 1;
+    // Temperature in target range — maintain with gentle circulation
+    $fan1_state = 1; $fan2_state = 0;     // One fan for gentle airflow
+    $heater1_state = 0; $heater2_state = 0; // No heating needed
+    $exhaust_state = 0;
     $phase = 'Drying';
 }
+
+// Update legacy variables for backward compatibility
+$fan_state = ($fan1_state || $fan2_state) ? 1 : 0;
+$heater_state = ($heater1_state || $heater2_state) ? 1 : 0;
 
 // ── 7. Log the reading into drying_logs ──────────────────────
 if (!$auto_stopped) {
     try {
         $dbh->prepare(
             "INSERT INTO drying_logs
-             (session_id, recorded_temp, recorded_humidity, heater_state, exhaust_state, fan_state, phase, timestamp)
-             VALUES (:sid, :temp, :hum, :heater, :exhaust, :fan, :phase, NOW())"
+             (session_id, recorded_temp, recorded_humidity, heater_state, heater1_state, heater2_state, 
+              exhaust_state, fan_state, fan1_state, fan2_state, phase, timestamp)
+             VALUES (:sid, :temp, :hum, :heater, :heater1, :heater2, :exhaust, :fan, :fan1, :fan2, :phase, NOW())"
         )->execute([
-            ':sid'    => $sid,
-            ':temp'   => $temp,
-            ':hum'    => $humidity,
-            ':heater' => $heater_state,
-            ':exhaust'=> $exhaust_state,
-            ':fan'    => $fan_state,
-            ':phase'  => $phase,
+            ':sid'     => $sid,
+            ':temp'    => $temp,
+            ':hum'     => $humidity,
+            ':heater'  => $heater_state,
+            ':heater1' => $heater1_state,
+            ':heater2' => $heater2_state,
+            ':exhaust' => $exhaust_state,
+            ':fan'     => $fan_state,
+            ':fan1'    => $fan1_state,
+            ':fan2'    => $fan2_state,
+            ':phase'   => $phase,
         ]);
     } catch (Exception $e) { /* non-fatal */ }
 }
 
-// ── 8. Fish-ready check: last 5 readings stable in target range ─
+// ── 8. Simple cycling behavior: target temp reached → cooldown ─
 // Only check when NOT already in cooldown or auto-stopped
 if (!$auto_stopped) {
-    $recentLogs = $dbh->prepare(
-        "SELECT recorded_temp, recorded_humidity FROM drying_logs
-         WHERE session_id=:sid ORDER BY timestamp DESC LIMIT 5"
-    );
-    $recentLogs->execute([':sid' => $sid]);
-    $recent = $recentLogs->fetchAll(PDO::FETCH_ASSOC);
-
-    if (count($recent) >= 5) {
-        $allReady = true;
-        foreach ($recent as $log) {
-            $lt = floatval($log['recorded_temp']);
-            $lh = floatval($log['recorded_humidity']);
-            if ($lt < $target_temp - 2 || $lt > $target_temp + 2 || $lh > $target_hum + 5) {
-                $allReady = false;
-                break;
-            }
-        }
-        $fish_ready = $allReady;
-
-        if ($fish_ready) {
-            // ── Target reached → enter 5-minute COOLDOWN ──────────
-            // Session stays 'Running' — it will restart heating after cooldown
-            $cooldown_end = date('Y-m-d H:i:s', $now_ts + 300); // 5 minutes
+    // Simple trigger: when temperature reaches or exceeds target
+    if ($temp >= $target_temp) {
+        // ── Target reached → enter 5-minute COOLDOWN ──────────
+        // Session stays 'Running' — it will restart heating after cooldown
+        $cooldown_end = date('Y-m-d H:i:s', $now_ts + 300); // 5 minutes
+        
+        // Update controls with cycle tracking (if column exists)
+        try {
+            $dbh->prepare(
+                "UPDATE drying_controls SET status='COOLDOWN', cooldown_until=:cu, cycle_count=cycle_count+1, last_cycle_start=NOW() WHERE id=1"
+            )->execute([':cu' => $cooldown_end]);
+        } catch (Exception $e) {
+            // Fallback if cycle_count column doesn't exist
             $dbh->prepare(
                 "UPDATE drying_controls SET status='COOLDOWN', cooldown_until=:cu WHERE id=1"
             )->execute([':cu' => $cooldown_end]);
-
-            // Save an intermediate record (not final — session keeps running)
-            _saveRecord($dbh, $sid, 'TargetReached');
-
-            // All relays OFF during cooldown
-            $fan_state = 0; $heater_state = 0; $exhaust_state = 0;
-            $phase = 'Cooldown';
-            $command = 'COOLDOWN';
-
-            $alert = [
-                'level'   => 'info',
-                'title'   => '🎉 Target Reached!',
-                'message' => "Temp {$temp}°C / Humidity {$humidity}% — 5-min cooldown started. Will resume heating after.",
-            ];
         }
+
+        // Save an intermediate record (not final — session keeps running)
+        _saveRecord($dbh, $sid, 'TargetReached');
+
+        // All relays OFF during cooldown
+        $fan1_state = 0; $fan2_state = 0; 
+        $heater1_state = 0; $heater2_state = 0; 
+        $exhaust_state = 0;
+        $phase = 'Cooldown';
+        $command = 'COOLDOWN';
+        $fish_ready = true;
+
+        $alert = [
+            'level'   => 'info',
+            'title'   => '🎯 Target Reached!',
+            'message' => "Temp {$temp}°C reached target {$target_temp}°C — 5-min cooldown started. Will resume heating after.",
+        ];
     }
 }
 
 sendResponse('success', 'Reading processed.', [
     'command'      => $command,
-    'heater'       => $heater_state,
+    'heater'       => $heater_state,      // Legacy compatibility
     'exhaust'      => $exhaust_state,
-    'fan'          => $fan_state,
+    'fan'          => $fan_state,         // Legacy compatibility
+    
+    // Dual device controls for new Arduino firmware
+    'heater1'      => $heater1_state,
+    'heater2'      => $heater2_state,
+    'fan1'         => $fan1_state,
+    'fan2'         => $fan2_state,
+    
     'phase'        => $phase,
     'session_id'   => $sid,
     'target_temp'  => $target_temp,

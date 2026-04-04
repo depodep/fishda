@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Database Migration - Auto Scheduler</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; margin: 40px; background: #f5f5f5; }
+        .container { max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .success { color: #16a085; background: #d5f4e6; padding: 10px; border-radius: 4px; border-left: 4px solid #16a085; }
+        .error { color: #e74c3c; background: #fdf2f2; padding: 10px; border-radius: 4px; border-left: 4px solid #e74c3c; }
+        .info { color: #3498db; background: #ebf3fd; padding: 10px; border-radius: 4px; border-left: 4px solid #3498db; }
+        pre { background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 4px; overflow-x: auto; }
+        .btn { background: #3498db; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; text-decoration: none; display: inline-block; }
+        .btn:hover { background: #2980b9; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>🗄️ Database Migration - Auto Scheduler</h2>
+        <p>This will add the <code>schedule_id</code> column to the <code>drying_sessions</code> table.</p>
+        
+        <div class="info">
+            <strong>Migration Steps:</strong><br>
+            1. Check if <code>schedule_id</code> column exists<br>
+            2. Add column if missing<br>
+            3. Add foreign key constraint<br>
+            4. Create index for performance
+        </div>
+        
+        <div style="margin: 20px 0;">
+            <a href="migrate_schedule_id.php" class="btn">🚀 Run Migration</a>
+        </div>
+        
+        <h3>Expected Results:</h3>
+        <pre>✅ Added schedule_id column to drying_sessions table
+✅ Added foreign key constraint for schedule_id
+✅ Database migration completed successfully!</pre>
+        
+        <div class="info">
+            <strong>After Migration:</strong><br>
+            • Scheduled sessions will be linked to their schedule<br>
+            • Dashboard will show schedule information<br>
+            • Auto-scheduler can track which sessions are scheduled
+        </div>
+        
+        <p><a href="../admin/users_dashboard.php">← Back to Dashboard</a></p>
+    </div>
+</body>
+</html>

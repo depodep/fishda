@@ -13,6 +13,9 @@ if (ob_get_level()) ob_clean();
 header('Content-Type: application/json');
 
 require_once '../database/dbcon.php';
+
+// Include dynamic scheduler functions
+require_once 'dynamic_scheduler.php';
 session_start();
 
 function sendResponse($status, $message, $data = []) {
@@ -122,9 +125,9 @@ function resolveSessionUserIdFromPrototype($dbh, $proto_id) {
 
 $proto_id = intval($_SESSION['proto_id'] ?? 0);
 $session_user_id = intval($_SESSION['user_id'] ?? 0);
-$is_admin = isset($_SESSION['sid']) && (($_SESSION['permission'] ?? 'user') === 'admin');
+$is_admin = isset($_SESSION['user_id']) && (($_SESSION['permission'] ?? 'user') === 'admin');
 
-if (!in_array($action, $esp_actions) && !isset($_SESSION['sid']) && $proto_id <= 0 && $session_user_id <= 0) {
+if (!in_array($action, $esp_actions) && !isset($_SESSION['user_id']) && $proto_id <= 0 && $session_user_id <= 0) {
     sendResponse('error', 'Unauthorized. Please login.');
 }
 
@@ -133,7 +136,7 @@ if (in_array($action, $esp_actions)) {
 }
 
 $user_id = $is_admin
-    ? intval($_SESSION['sid'] ?? 0)
+    ? intval($_SESSION['user_id'] ?? 0)
     : resolveSessionUserIdFromPrototype($dbh, $proto_id);
 
 switch ($action) {
@@ -160,7 +163,7 @@ switch ($action) {
             if ($protoData) {
                 $isActive = ((string)$protoData['status'] === '1');
                 $secondsSince = intval($protoData['seconds_since_seen'] ?? 999999);
-                $isOnline = $isActive && $secondsSince <= 20;
+                $isOnline = $isActive && $secondsSince <= 30;  // Updated to 30 seconds
                 
                 if (!$isOnline) {
                     sendResponse('error', 'Cannot start session. The prototype device is currently offline. Please check the device connection.');
@@ -239,6 +242,9 @@ switch ($action) {
     //  UPDATED: FAN = heat source (ON during Heating + Drying)
     // ============================================================
     case 'log_reading':
+        // Validate scheduled sessions before processing log
+        validateScheduledSessions($dbh);
+        
         $session_id        = intval($_POST['session_id'] ?? 0);
         $recorded_temp     = floatval($_POST['temp'] ?? 0);
         $recorded_humidity = floatval($_POST['humidity'] ?? 0);
@@ -358,23 +364,8 @@ switch ($action) {
     // ============================================================
     case 'get_live_data':
         try {
-            if ($user_id > 0) {
-                $stmt = $dbh->prepare(
-                    "SELECT session_id, set_temp, set_humidity, start_time
-                     FROM drying_sessions
-                     WHERE user_id = :uid AND status = 'Running'
-                     ORDER BY start_time DESC LIMIT 1"
-                );
-                $stmt->execute([':uid' => $user_id]);
-            } else {
-                $stmt = $dbh->query(
-                    "SELECT session_id, set_temp, set_humidity, start_time
-                     FROM drying_sessions
-                     WHERE status = 'Running'
-                     ORDER BY start_time DESC LIMIT 1"
-                );
-            }
-            $session = $stmt->fetch(PDO::FETCH_ASSOC);
+            // Use dynamic scheduler to get current session status
+            $session = getCurrentSessionStatus($dbh, $user_id);
 
             if (!$session) {
                 sendResponse('error', 'No active session found.');
@@ -382,10 +373,24 @@ switch ($action) {
 
             $sid = $session['session_id'];
 
-            // ── Fetch controls row for cooldown state ──────────────
-            $ctrl = $dbh->query("SELECT status AS ctrl_status, cooldown_until FROM drying_controls WHERE id=1")->fetch(PDO::FETCH_ASSOC);
+            // ── Fetch controls row for cooldown state and cycle count ──
+            $ctrl_query = "SELECT status AS ctrl_status, cooldown_until";
+            
+            // Check if cycle_count column exists before querying
+            try {
+                $dbh->query("SELECT cycle_count FROM drying_controls LIMIT 1");
+                $ctrl_query .= ", cycle_count, last_cycle_start";
+            } catch (Exception $e) {
+                // cycle_count column doesn't exist yet - skip it
+            }
+            
+            $ctrl_query .= " FROM drying_controls WHERE id=1";
+            $ctrl = $dbh->query($ctrl_query)->fetch(PDO::FETCH_ASSOC);
+            
             $ctrl_status        = $ctrl['ctrl_status']    ?? 'RUNNING';
             $cooldown_until     = $ctrl['cooldown_until'] ?? null;
+            $cycle_count        = $ctrl['cycle_count']    ?? 0;
+            $last_cycle_start   = $ctrl['last_cycle_start'] ?? null;
             $cooldown_remaining = 0;
             if ($ctrl_status === 'COOLDOWN' && $cooldown_until) {
                 $cooldown_remaining = max(0, strtotime($cooldown_until) - time());
@@ -417,6 +422,13 @@ switch ($action) {
                     'start_time'         => $session['start_time'],
                     'ctrl_status'        => $ctrl_status,
                     'cooldown_remaining' => $cooldown_remaining,
+                    'is_scheduled'       => !empty($session['schedule_id']),
+                    'schedule_id'        => $session['schedule_id'] ? (int)$session['schedule_id'] : null,
+                    'schedule_title'     => $session['schedule_title'] ?? null,
+                    'schedule_date'      => $session['sched_date'] ?? null,
+                    'schedule_time'      => $session['sched_time'] ?? null,
+                    'duration_hours'     => $session['duration_hours'] ? floatval($session['duration_hours']) : null,
+                    'auto_started'       => $session['auto_started'] ? (int)$session['auto_started'] : 0,
                 ]);
             }
 
@@ -431,6 +443,17 @@ switch ($action) {
             $log['start_time']         = $session['start_time'];
             $log['ctrl_status']        = $ctrl_status;
             $log['cooldown_remaining'] = $cooldown_remaining;
+            $log['cycle_count']        = (int)$cycle_count;
+            $log['last_cycle_start']   = $last_cycle_start;
+            
+            // Add schedule information
+            $log['is_scheduled']       = !empty($session['schedule_id']);
+            $log['schedule_id']        = $session['schedule_id'] ? (int)$session['schedule_id'] : null;
+            $log['schedule_title']     = $session['schedule_title'] ?? null;
+            $log['schedule_date']      = $session['sched_date'] ?? null;
+            $log['schedule_time']      = $session['sched_time'] ?? null;
+            $log['duration_hours']     = $session['duration_hours'] ? floatval($session['duration_hours']) : null;
+            $log['auto_started']       = $session['auto_started'] ? (int)$session['auto_started'] : 0;
 
             // Fish-ready check
             $recentLogs = $dbh->prepare("SELECT recorded_temp, recorded_humidity FROM drying_logs WHERE session_id=:sid ORDER BY timestamp DESC LIMIT 5");
@@ -493,7 +516,7 @@ switch ($action) {
 
             $secondsSinceSeen = intval($proto['seconds_since_seen'] ?? 999999);
             $isActive = ((string)$proto['status'] === '1');
-            $isOnline = $isActive && $secondsSinceSeen <= 20;
+            $isOnline = $isActive && $secondsSinceSeen <= 30;  // Updated to 30 seconds
 
             sendResponse('success', 'Prototype status fetched.', [
                 'id'                   => (int)$proto['id'],

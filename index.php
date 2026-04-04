@@ -78,14 +78,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'login
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <style>
 :root {
-    --bg:        #080f1a;
-    --panel:     rgba(10,20,40,0.82);
-    --accent:    #00d4ff;
-    --accent2:   #0af5a0;
-    --gold:      #ffd166;
-    --border:    rgba(0,212,255,0.18);
-    --muted:     rgba(255,255,255,0.38);
-    --txt:       #e8f4ff;
+    --bg:        #0a0e1a;
+    --panel:     rgba(15,25,45,0.90);
+    --accent:    #00e5ff;
+    --accent2:   #00ff88;
+    --gold:      #ffb800;
+    --border:    rgba(0,229,255,0.25);
+    --muted:     rgba(255,255,255,0.65);
+    --txt:       #ffffff;
+    --text-dim:  rgba(255,255,255,0.85);
+    --success:   #00ff88;
+    --warning:   #ffb800;
+    --danger:    #ff4757;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin:0; padding:0; }
@@ -104,17 +108,17 @@ body {
 .bg-layer {
     position: fixed; inset: 0; z-index: 0;
     background:
-        radial-gradient(ellipse 80% 60% at 20% 50%, rgba(0,212,255,0.06) 0%, transparent 60%),
-        radial-gradient(ellipse 60% 80% at 80% 50%, rgba(10,245,160,0.05) 0%, transparent 55%),
-        linear-gradient(160deg, #040c18 0%, #060f1e 50%, #050b16 100%);
+        radial-gradient(ellipse 80% 60% at 20% 50%, rgba(0,229,255,0.12) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 80% at 80% 50%, rgba(0,255,136,0.08) 0%, transparent 55%),
+        linear-gradient(160deg, #050d1c 0%, #0a1225 50%, #060e1a 100%);
 }
 
 /* Grid lines */
 .bg-grid {
     position: fixed; inset: 0; z-index: 1; pointer-events: none;
     background-image:
-        linear-gradient(rgba(0,212,255,0.04) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(0,212,255,0.04) 1px, transparent 1px);
+        linear-gradient(rgba(0,229,255,0.08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,229,255,0.08) 1px, transparent 1px);
     background-size: 50px 50px;
     animation: gridDrift 20s linear infinite;
 }
@@ -128,8 +132,8 @@ body {
     position: fixed; border-radius: 50%; filter: blur(80px);
     pointer-events: none; z-index: 1; animation: orbFloat 12s ease-in-out infinite alternate;
 }
-.orb-1 { width:420px; height:420px; top:-10%; left:-5%; background:rgba(0,212,255,0.07); animation-delay:0s; }
-.orb-2 { width:320px; height:320px; bottom:0; right:-5%; background:rgba(10,245,160,0.06); animation-delay:-5s; }
+.orb-1 { width:420px; height:420px; top:-10%; left:-5%; background:rgba(0,229,255,0.15); animation-delay:0s; }
+.orb-2 { width:320px; height:320px; bottom:0; right:-5%; background:rgba(0,255,136,0.12); animation-delay:-5s; }
 @keyframes orbFloat {
     0%   { transform: translate(0,0) scale(1); }
     100% { transform: translate(30px,40px) scale(1.08); }
@@ -183,7 +187,7 @@ body {
 .sys-title {
     font-size: 2.2rem;
     font-weight: 800;
-    color: #fff;
+    color: var(--txt);
     line-height: 1.1;
     margin-bottom: 8px;
     letter-spacing: -0.02em;
@@ -199,7 +203,7 @@ body {
 }
 
 .sys-desc {
-    color: rgba(220,240,255,0.65);
+    color: var(--text-dim);
     font-size: 0.85rem;
     line-height: 1.6;
     max-width: 440px;
@@ -293,6 +297,83 @@ body {
     letter-spacing: 0.05em;
 }
 
+/* ── COMPACT DESIGN STYLES ── */
+.compact-header {
+    text-align: left;
+    margin-bottom: 16px;
+}
+
+.main-content {
+    flex: 1;
+}
+
+/* ── COMPACT FEATURE GRID ── */
+.feature-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.feature-chip {
+    display: flex; 
+    align-items: center; 
+    gap: 8px;
+    background: rgba(0,229,255,0.08);
+    border: 1px solid rgba(0,229,255,0.2);
+    border-radius: 6px;
+    padding: 6px 10px;
+    transition: border-color .2s, background .2s;
+    font-size: 0.7rem;
+    color: var(--txt);
+    font-weight: 500;
+}
+
+.feature-chip:nth-child(3) {
+    grid-column: 1 / -1;
+    justify-self: center;
+    max-width: 200px;
+}
+
+.feature-chip:hover {
+    border-color: rgba(0,229,255,0.4);
+    background: rgba(0,229,255,0.12);
+}
+
+.feature-chip i {
+    color: var(--accent);
+    font-size: 0.75rem;
+    width: 16px;
+    text-align: center;
+}
+
+/* ── INLINE CONTACT ── */
+.contact-inline {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background: rgba(255,184,0,0.08);
+    border: 1px solid rgba(255,184,0,0.3);
+    border-radius: 8px;
+    padding: 10px 12px;
+}
+
+.contact-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.68rem;
+    color: rgba(255,230,150,0.95);
+    font-weight: 500;
+}
+
+.contact-item i {
+    color: var(--warning);
+    width: 14px;
+    text-align: center;
+    font-size: 0.65rem;
+}
+
 /* ════════════════════════════
    RIGHT — LOGIN PANEL
 ════════════════════════════ */
@@ -313,9 +394,9 @@ body {
     padding: 28px 26px 24px;
     backdrop-filter: blur(22px);
     box-shadow:
-        0 0 0 1px rgba(0,212,255,0.06),
+        0 0 0 1px rgba(0,229,255,0.12),
         0 20px 50px rgba(0,0,0,0.7),
-        inset 0 1px 0 rgba(255,255,255,0.05);
+        inset 0 1px 0 rgba(255,255,255,0.08);
     position: relative;
     overflow: hidden;
 }
@@ -331,7 +412,7 @@ body {
     position: absolute; top: 18px; right: 22px;
     font-family: 'Space Mono', monospace;
     font-size: 0.6rem;
-    color: rgba(0,212,255,0.3);
+    color: rgba(0,229,255,0.4);
     letter-spacing: 0.08em;
 }
 
@@ -343,21 +424,21 @@ body {
 /* Circuit logo */
 .circuit-icon {
     width: 50px; height: 50px;
-    background: rgba(0,212,255,0.08);
-    border: 1px solid rgba(0,212,255,0.25);
+    background: rgba(0,229,255,0.15);
+    border: 1px solid rgba(0,229,255,0.4);
     border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
     margin: 0 auto 12px;
     font-size: 1.2rem;
     color: var(--accent);
-    box-shadow: 0 0 20px rgba(0,212,255,0.15);
+    box-shadow: 0 0 20px rgba(0,229,255,0.25);
     position: relative;
 }
 .circuit-icon::after {
     content: '';
     position: absolute; inset: -4px;
     border-radius: 50%;
-    border: 1px dashed rgba(0,212,255,0.2);
+    border: 1px dashed rgba(0,229,255,0.3);
     animation: spin 10s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -365,7 +446,7 @@ body {
 .login-head h2 {
     font-size: 1.2rem;
     font-weight: 800;
-    color: #fff;
+    color: var(--txt);
     margin-bottom: 3px;
 }
 .login-head p {
@@ -382,7 +463,7 @@ body {
     font-size: 0.68rem;
     font-weight: 700;
     letter-spacing: 0.1em;
-    color: rgba(0,212,255,0.8);
+    color: rgba(0,229,255,0.9);
     text-transform: uppercase;
     margin-bottom: 5px;
 }
@@ -392,16 +473,16 @@ body {
 .f-icon {
     position: absolute; left: 12px; top: 50%;
     transform: translateY(-50%);
-    color: rgba(0,212,255,0.45);
+    color: rgba(0,229,255,0.6);
     font-size: 0.8rem;
     pointer-events: none;
 }
 .f-input {
     width: 100%;
-    background: rgba(0,212,255,0.04);
-    border: 1px solid rgba(0,212,255,0.18);
+    background: rgba(0,229,255,0.08);
+    border: 1px solid rgba(0,229,255,0.25);
     border-radius: 8px;
-    color: #e8f4ff;
+    color: var(--txt);
     font-family: 'Space Mono', monospace;
     font-size: 0.82rem;
     padding: 10px 12px 10px 36px;
@@ -409,18 +490,18 @@ body {
     transition: border-color .2s, box-shadow .2s, background .2s;
     letter-spacing: 0.04em;
 }
-.f-input::placeholder { color: rgba(255,255,255,0.2); }
+.f-input::placeholder { color: rgba(255,255,255,0.4); }
 .f-input:focus {
     border-color: var(--accent);
-    background: rgba(0,212,255,0.07);
-    box-shadow: 0 0 0 2px rgba(0,212,255,0.1);
+    background: rgba(0,229,255,0.12);
+    box-shadow: 0 0 0 2px rgba(0,229,255,0.15);
 }
 
 /* Example hint */
 .f-hint {
     font-family: 'Space Mono', monospace;
     font-size: 0.6rem;
-    color: rgba(0,212,255,0.4);
+    color: rgba(0,229,255,0.5);
     margin-top: 3px;
     padding-left: 2px;
 }
@@ -516,78 +597,43 @@ body {
     <!-- ════ LEFT — SYSTEM INFO ════ -->
     <div class="info-side">
 
-        <div class="sys-badge">
-            <span class="dot"></span>
-            SYSTEM ONLINE
+        <div class="compact-header">
+            <div class="sys-badge">
+                <span class="dot"></span>
+                SYSTEM ONLINE
+            </div>
+            <h1 class="sys-title">Automated <span>Prototype</span> System</h1>
+            <div class="sys-sub">IoT MONITORING & CONTROL PLATFORM</div>
         </div>
 
-        <h1 class="sys-title">Automated<br><span>Prototype</span><br>System</h1>
-        <div class="sys-sub">// IoT-BASED MONITORING &amp; CONTROL PLATFORM</div>
+        <div class="main-content">
+            <p class="sys-desc">
+                Centralized platform for real-time monitoring, control, and data logging of registered IoT prototypes. Each unit identified by model name and access code.
+            </p>
 
-        <p class="sys-desc">
-            Welcome to the Automated Prototype Management System — a centralized platform for real-time monitoring, control, and data logging of registered IoT-based prototypes. Each unit is uniquely identified by its model name and access code, allowing seamless and secure session access.
-        </p>
-
-        <div class="feature-list">
-            <div class="feature-item">
-                <div class="feature-icon"><i class="fas fa-microchip"></i></div>
-                <div class="feature-text">
-                    <strong>Real-Time Automation</strong>
-                    <span>Live sensor data &amp; actuator control per prototype</span>
+            <div class="feature-grid">
+                <div class="feature-chip">
+                    <i class="fas fa-microchip"></i>
+                    <span>Real-Time Automation</span>
                 </div>
-            </div>
-            <div class="feature-item">
-                <div class="feature-icon"><i class="fas fa-shield-halved"></i></div>
-                <div class="feature-text">
-                    <strong>Secure Code-Based Access</strong>
-                    <span>Each prototype has a unique model name &amp; assigned code</span>
+                <div class="feature-chip">
+                    <i class="fas fa-shield-halved"></i>
+                    <span>Secure Access</span>
                 </div>
-            </div>
-            <div class="feature-item">
-                <div class="feature-icon"><i class="fas fa-chart-line"></i></div>
-                <div class="feature-text">
-                    <strong>Data Logging &amp; History</strong>
-                    <span>Automated records stored per session per unit</span>
-                </div>
-            </div>
-        </div>
-
-        <!-- INQUIRY SECTION -->
-        <div class="inquiry-box">
-            <div class="inquiry-title">
-                <i class="fas fa-headset"></i>
-                HOW TO ORDER / INQUIRE
-            </div>
-
-            <div class="inquiry-row">
-                <i class="fas fa-circle-info inq-icon"></i>
-                <div class="inq-text">
-                    <strong>HOW TO ORDER</strong>
-                    To order or request access to a prototype, contact the system administrator with your desired model and your institution details. You will be issued a unique model name and access code upon approval.
+                <div class="feature-chip">
+                    <i class="fas fa-chart-line"></i>
+                    <span>Data Logging</span>
                 </div>
             </div>
 
-            <div class="inquiry-row">
-                <i class="fas fa-phone inq-icon"></i>
-                <div class="inq-text">
-                    <strong>CONTACT THE ADMIN</strong>
-                    <span class="inq-contact">📞 +63 912 345 6789</span>
+            <div class="contact-inline">
+                <div class="contact-item">
+                    <i class="fas fa-phone"></i>
+                    <span>+63 912 345 6789</span>
                 </div>
-            </div>
-
-            <div class="inquiry-row">
-                <i class="fas fa-envelope inq-icon"></i>
-                <div class="inq-text">
-                    <strong>EMAIL</strong>
-                    admin@protoautosys.edu.ph
-                </div>
-            </div>
-
-            <div class="inquiry-row">
-                <i class="fas fa-clock inq-icon"></i>
-                <div class="inq-text">
-                    <strong>SUPPORT HOURS</strong>
-                    Monday – Friday &nbsp;|&nbsp; 8:00 AM – 5:00 PM
+                <div class="contact-item">
+                    <i class="fas fa-envelope"></i>
+                    <span>admin@protoautosys.edu.ph</span>
                 </div>
             </div>
         </div>

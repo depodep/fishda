@@ -12,6 +12,10 @@ if (ob_get_level()) ob_clean();
 header('Content-Type: application/json');
 
 require_once '../database/dbcon.php';
+
+// Include dynamic scheduler functions
+require_once 'dynamic_scheduler.php';
+
 session_start();
 
 function sendResponse($status, $message, $data = []) {
@@ -51,10 +55,10 @@ function resolveControlUserIdFromPrototype($dbh, $proto_id) {
 }
 
 $action = $_POST['action'] ?? $_GET['action'] ?? null;
-$is_admin = isset($_SESSION['sid']) && (($_SESSION['permission'] ?? 'user') === 'admin');
+$is_admin = isset($_SESSION['user_id']) && (($_SESSION['permission'] ?? 'user') === 'admin');
 $proto_id = intval($_SESSION['proto_id'] ?? 0);
 $resolved_user_id = $is_admin
-    ? intval($_SESSION['sid'] ?? 0)
+    ? intval($_SESSION['user_id'] ?? 0)
     : resolveControlUserIdFromPrototype($dbh, $proto_id);
 
 // Actions that require a logged-in user
@@ -134,6 +138,9 @@ switch ($action) {
     // ── ESP8266 polls this to know targets / start status ─────
     case 'fetch_controls':
         try {
+            // Validate scheduled sessions before fetching controls
+            validateScheduledSessions($dbh);
+            
             $row = $dbh->query(
                 "SELECT status, target_temp, target_humidity FROM drying_controls WHERE id=1"
             )->fetch(PDO::FETCH_ASSOC);

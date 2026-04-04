@@ -17,10 +17,10 @@ function resp($status, $message, $data = []) {
     exit;
 }
 
-if (!isset($_SESSION['sid'])) resp('error', 'Unauthorized.');
+if (!isset($_SESSION['user_id'])) resp('error', 'Unauthorized.');
 
 $action  = $_POST['action'] ?? $_GET['action'] ?? null;
-$user_id = $_SESSION['sid'];
+$user_id = $_SESSION['user_id'];
 $is_admin = ($_SESSION['permission'] ?? 'user') === 'admin';
 
 switch ($action) {
@@ -34,6 +34,7 @@ switch ($action) {
         $sched_time  = $_POST['sched_time']  ?? '08:00'; // HH:MM
         $set_temp    = floatval($_POST['set_temp']  ?? 45);
         $set_hum     = floatval($_POST['set_hum']   ?? 25);
+        $duration    = floatval($_POST['duration_hours'] ?? 2.0); // Default 2 hours
         $notes       = htmlspecialchars(trim($_POST['notes'] ?? ''));
 
         if (!$sched_date) resp('error', 'Schedule date is required.');
@@ -41,18 +42,19 @@ switch ($action) {
         try {
             $stmt = $dbh->prepare(
                 "INSERT INTO batch_schedules
-                    (user_id, title, sched_date, sched_time, set_temp, set_humidity, notes, status)
+                    (user_id, title, sched_date, sched_time, set_temp, set_humidity, duration_hours, notes, status)
                  VALUES
-                    (:uid, :title, :date, :time, :temp, :hum, :notes, 'Scheduled')"
+                    (:uid, :title, :date, :time, :temp, :hum, :duration, :notes, 'Scheduled')"
             );
             $stmt->execute([
-                ':uid'   => $user_id,
-                ':title' => $title,
-                ':date'  => $sched_date,
-                ':time'  => $sched_time,
-                ':temp'  => $set_temp,
-                ':hum'   => $set_hum,
-                ':notes' => $notes,
+                ':uid'      => $user_id,
+                ':title'    => $title,
+                ':date'     => $sched_date,
+                ':time'     => $sched_time,
+                ':temp'     => $set_temp,
+                ':hum'      => $set_hum,
+                ':duration' => $duration,
+                ':notes'    => $notes,
             ]);
             resp('success', 'Prototype batch scheduled.', ['schedule_id' => $dbh->lastInsertId()]);
         } catch (Exception $e) {

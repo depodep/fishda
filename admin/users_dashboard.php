@@ -405,6 +405,7 @@ if (!isset($_SESSION['session_logged'])) {
       <span class="session-dot" style="background:#8BA7C4;box-shadow:none;"></span>
       <span id="sessionStatusText">No Active Session</span>
     </div>
+    <button onclick="checkExistingSession()" style="margin-left:8px;padding:2px 6px;font-size:9px;background:rgba(59,130,246,.1);color:#3b82f6;border:1px solid rgba(59,130,246,.2);border-radius:4px;cursor:pointer;" title="Refresh session status">🔄</button>
   </div>
 
   <div class="content-wrap">
@@ -503,11 +504,38 @@ if (!isset($_SESSION['session_logged'])) {
         <!-- Drying Progress -->
         <div class="col-lg-4">
           <div class="control-card" style="height:100%;">
-            <div class="control-section-title"><i class="fas fa-chart-bar" style="color:var(--seafoam)"></i>Drying Progress</div>
+            <div class="control-section-title">
+              <i class="fas fa-chart-bar" style="color:var(--seafoam)"></i>Drying Progress
+              <button class="btn-stop" id="stopBtn" onclick="stopSession()" style="display:none;margin-left:auto;padding:4px 8px;font-size:10px;background:rgba(239,68,68,.1);color:#dc2626;border:1px solid rgba(239,68,68,.2);border-radius:6px;cursor:pointer;"><i class="fas fa-stop me-1"></i>Stop</button>
+            </div>
             <div id="progressSection">
               <div id="phaseBadgeWrap" class="mb-3">
                 <span class="phase-badge phase-Idle" id="phaseBadge"><i class="fas fa-circle-dot me-1"></i>Idle</span>
               </div>
+              
+              <!-- Scheduled Session Info -->
+              <div id="scheduledInfo" style="display:none;background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.2);border-radius:8px;padding:8px;margin-bottom:12px;">
+                <div style="font-size:10px;color:var(--text-muted);margin-bottom:2px;">📅 SCHEDULED SESSION</div>
+                <div style="font-size:11px;font-weight:600;color:#3b82f6;" id="scheduleTitle">Loading...</div>
+                <div style="font-size:10px;color:var(--text-muted);margin-top:2px;" id="scheduleTime">Loading...</div>
+              </div>
+
+              <!-- Session Timer -->
+              <div id="sessionTimer" style="display:none;text-align:center;margin-bottom:12px;">
+                <div style="font-size:10px;color:var(--text-muted);margin-bottom:2px;" id="timerLabel">Session Duration</div>
+                <div style="font-size:16px;font-weight:700;color:var(--teal);font-family:'Space Mono',monospace;" id="elapsedTime">00:00:00</div>
+                
+                <!-- Scheduled Duration Info -->
+                <div id="scheduledDuration" style="display:none;margin-top:4px;">
+                  <div style="font-size:9px;color:var(--text-muted);">Scheduled: <span id="scheduledHours" style="color:var(--amber);font-weight:600;">2.0h</span></div>
+                </div>
+                
+                <!-- Cycle Count -->
+                <div id="cycleCount" style="display:none;margin-top:4px;font-size:9px;color:var(--text-muted);">
+                  Heating Cycles: <span style="color:var(--seafoam);font-weight:600;" id="cycleNumber">0</span>
+                </div>
+              </div>
+
               <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">Moisture Reduction</div>
               <div class="drying-progress"><div class="drying-fill" id="dryingFill" style="width:0%"></div></div>
               <div class="d-flex justify-content-between" style="font-size:10.5px;color:var(--text-muted);margin-top:2px;"><span>0%</span><span id="progressPct" style="font-weight:700;color:var(--teal)">0%</span><span>100%</span></div>
@@ -580,9 +608,11 @@ if (!isset($_SESSION['session_logged'])) {
               </div>
             </div>
             <div class="mt-3 d-flex flex-wrap justify-content-center" id="hwChips">
-              <span class="hw-chip"><span class="dot-off"></span>Fan (Heat)</span>
+              <span class="hw-chip"><span class="dot-off"></span>Fan 1</span>
+              <span class="hw-chip"><span class="dot-off"></span>Fan 2</span>
+              <span class="hw-chip"><span class="dot-off"></span>Heater 1</span>
+              <span class="hw-chip"><span class="dot-off"></span>Heater 2</span>
               <span class="hw-chip"><span class="dot-off"></span>Exhaust</span>
-              <span class="hw-chip"><span class="dot-off"></span>Heater</span>
             </div>
           </div>
         </div>
@@ -728,6 +758,20 @@ if (!isset($_SESSION['session_logged'])) {
         </div>
       </div>
     </div>
+    <div class="row g-3 mt-2">
+      <div class="col-6">
+        <div class="form-row">
+          <label class="form-label">Duration (hours)</label>
+          <input type="number" id="sched_duration" class="form-input" value="2.0" min="0.5" max="24" step="0.5">
+        </div>
+      </div>
+      <div class="col-6">
+        <div class="form-row">
+          <label class="form-label" style="color:var(--text-muted);font-size:10px;">Auto Start & Stop</label>
+          <div style="font-size:11px;color:var(--text-muted);padding:8px;background:rgba(59,130,246,.08);border-radius:6px;">Session will start at scheduled time and stop after duration</div>
+        </div>
+      </div>
+    </div>
     <div class="form-row">
       <label class="form-label">Notes (optional)</label>
       <textarea id="sched_notes" class="form-input" rows="2" placeholder="Any notes…"></textarea>
@@ -837,26 +881,82 @@ async function startSession(){
 }
 
 async function stopSession(){
-  const r=await Swal.fire({
-    title:'Stop Session?',text:'This will mark the session as Completed and save the record.',
-    icon:'warning',showCancelButton:true,confirmButtonColor:'#E63946',
-    confirmButtonText:'Stop',background:'#fff',color:'#0D1B2A'
+  // Enhanced confirmation dialog with more info
+  const result = await Swal.fire({
+    title: '⚠️ Stop Heating Session?',
+    html: `
+      <div style="text-align: left; margin: 15px 0;">
+        <p><strong>This will:</strong></p>
+        <ul style="text-align: left; margin-left: 20px;">
+          <li>Turn off all fans and heaters immediately</li>
+          <li>Mark session as "Completed"</li>
+          <li>Save current progress to records</li>
+          <li>Stop temperature cycling</li>
+        </ul>
+        <div style="margin-top: 15px; padding: 10px; background: rgba(239,68,68,0.1); border-radius: 6px; border: 1px solid rgba(239,68,68,0.2);">
+          <strong>⚡ Override Stop:</strong> This will immediately stop all heating regardless of current temperature or phase.
+        </div>
+      </div>
+    `,
+    icon: 'warning',
+    showCancelButton: true,
+    confirmButtonColor: '#E63946',
+    confirmButtonText: '🛑 Stop Session',
+    cancelButtonText: 'Continue Session',
+    reverseButtons: true,
+    background: '#fff',
+    color: '#0D1B2A',
+    width: '480px'
   });
-  if(!r.isConfirmed) return;
-  try{
-    const fd=new FormData();
-    fd.append('action','stop_session');
-    if(sessionId) fd.append('session_id',sessionId);
-    const j=await(await fetch('../api/session_api.php',{method:'POST',body:fd})).json();
-    if(j.status==='success'){
-      sessionRunning=false;
+  
+  if (!result.isConfirmed) return;
+  
+  try {
+    // Show stopping message
+    const loadingToast = Swal.fire({
+      title: 'Stopping Session...',
+      text: 'Turning off all heating devices',
+      icon: 'info',
+      allowOutsideClick: false,
+      showConfirmButton: false,
+      didOpen: () => Swal.showLoading()
+    });
+    
+    const fd = new FormData();
+    fd.append('action', 'stop_session');
+    if (sessionId) fd.append('session_id', sessionId);
+    
+    const response = await fetch('../api/session_api.php', {
+      method: 'POST', 
+      body: fd
+    });
+    
+    const j = await response.json();
+    
+    loadingToast.close();
+    
+    if (j.status === 'success') {
+      sessionRunning = false;
       clearInterval(timerInterval);
       updateControlUI(false);
       updateSessionBadge(false);
       hideBanners();
-      showToast('success','Session Completed','Your drying session has been saved.',4000);
-    } else { showToast('warning','Error',j.message||'Failed.',3000); }
-  }catch(e){ showToast('warning','Network Error','Server unreachable.',3000); }
+      
+      // Clear hardware states
+      updateHWChips({
+        fan1_state: 0, fan2_state: 0, 
+        heater1_state: 0, heater2_state: 0, 
+        exhaust_state: 0
+      });
+      
+      showToast('success', '✅ Session Stopped', 'All heating devices turned off. Session data saved.', 5000);
+    } else {
+      showToast('error', 'Stop Failed', j.message || 'Could not stop session.', 4000);
+    }
+  } catch (e) {
+    Swal.close();
+    showToast('error', 'Network Error', 'Could not connect to server to stop session.', 4000);
+  }
 }
 
 function hideBanners(){
@@ -866,12 +966,18 @@ function hideBanners(){
 
 function updateControlUI(running,temp,hum){
   const section=document.getElementById('controlSection');
+  const stopBtn=document.getElementById('stopBtn');
+  
   if(running){
-    section.innerHTML=`<button class="btn-stop" onclick="stopSession()"><i class="fas fa-stop me-2"></i>Stop Session</button>`;
+    section.innerHTML=`<div style="text-align:center;color:var(--text-muted);font-size:11px;padding:12px;background:rgba(42,157,143,.05);border-radius:8px;border:1px solid rgba(42,157,143,.15);"><i class="fas fa-cog fa-spin me-2"></i>Session Active</div>`;
     document.getElementById('setTempDisp').textContent=(temp||'—')+'°C';
     document.getElementById('setHumDisp').textContent=(hum||'—')+'%';
     document.getElementById('phaseBadge').className='phase-badge phase-Heating';
     document.getElementById('phaseBadge').innerHTML='<i class="fas fa-fan me-1"></i>Heating';
+    
+    // Show stop button when session is running
+    if(stopBtn) stopBtn.style.display='inline-block';
+    
   } else {
     section.innerHTML=`<button class="btn-start" id="startBtn" onclick="startSession()"><i class="fas fa-play me-2"></i>Start Drying Session</button>`;
     document.getElementById('setTempDisp').textContent='—';
@@ -880,6 +986,10 @@ function updateControlUI(running,temp,hum){
     document.getElementById('phaseBadge').innerHTML='<i class="fas fa-circle-dot me-1"></i>Idle';
     document.getElementById('dryingFill').style.width='0%';
     document.getElementById('progressPct').textContent='0%';
+    
+    // Hide stop button when session is not running
+    if(stopBtn) stopBtn.style.display='none';
+    
     // Update button state based on online status
     updateStartButtonState();
   }
@@ -899,6 +1009,24 @@ function updateSessionBadge(running){
   }
 }
 
+function formatTimeAgo(seconds) {
+  if (seconds === null || seconds < 0) return '';
+  
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+  
+  let parts = [];
+  
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0) parts.push(`${hours}h`);
+  if (minutes > 0) parts.push(`${minutes}m`);
+  if (secs > 0) parts.push(`${secs}s`);
+  
+  return parts.length > 0 ? parts.join(' ') : '0s';
+}
+
 function updatePrototypeOnlineIndicator(isActive, isOnline, secondsSinceSeen){
   // Update global online status
   prototypeOnline = isOnline;
@@ -909,7 +1037,26 @@ function updatePrototypeOnlineIndicator(isActive, isOnline, secondsSinceSeen){
   const headerDot=document.getElementById('protoOnlineHeaderDot');
   const sidebarText=document.getElementById('protoOnlineText');
   const headerText=document.getElementById('protoOnlineHeaderText');
-  const label=!isActive ? 'Inactive' : (isOnline ? 'Active · Online' : 'Active · Offline');
+  
+  // Sidebar: Simple Online/Offline only
+  const sidebarLabel = !isActive ? 'Inactive' : (isOnline ? 'Online' : 'Offline');
+  
+  // Header: Include time ago for offline status
+  let headerLabel;
+  if (!isActive) {
+    headerLabel = 'Inactive';
+  } else if (isOnline) {
+    headerLabel = 'Online';
+  } else {
+    // Offline with time
+    if (secondsSinceSeen !== null && secondsSinceSeen > 20) {
+      const timeAgo = formatTimeAgo(secondsSinceSeen);
+      headerLabel = `Offline · Last seen ${timeAgo} ago`;
+    } else {
+      headerLabel = 'Offline';
+    }
+  }
+  
   [sidebar, header].forEach(el=>{
     if(!el) return;
     el.classList.toggle('offline', !isOnline);
@@ -920,9 +1067,9 @@ function updatePrototypeOnlineIndicator(isActive, isOnline, secondsSinceSeen){
     el.classList.toggle('offline', !isOnline);
     el.classList.toggle('inactive', !isActive);
   });
-  const withSince = (isActive && !isOnline && secondsSinceSeen !== null) ? `${label} · ${secondsSinceSeen}s ago` : label;
-  if(sidebarText) sidebarText.textContent = withSince;
-  if(headerText) headerText.textContent = withSince;
+  
+  if(sidebarText) sidebarText.textContent = sidebarLabel;
+  if(headerText) headerText.textContent = headerLabel;
   
   // Update header device status
   updateHeaderDeviceStatus(isActive, isOnline, secondsSinceSeen);
@@ -953,10 +1100,8 @@ function updateHeaderDeviceStatus(isActive, isOnline, secondsSinceSeen){
     // Device is offline (was active but not responding)
     pill.classList.add('offline');
     if(secondsSinceSeen !== null && secondsSinceSeen > 20){
-      const m = Math.floor(secondsSinceSeen / 60);
-      const s = secondsSinceSeen % 60;
-      const timeAgo = m > 0 ? `${m}m ${s}s ago` : `${s}s ago`;
-      text.textContent = `Offline · Last seen ${timeAgo}`;
+      const timeAgo = formatTimeAgo(secondsSinceSeen);
+      text.textContent = `Offline · Last seen ${timeAgo} ago`;
     } else {
       text.textContent = 'Device Offline';
     }
@@ -993,6 +1138,94 @@ function startTimer(){
 }
 
 // ════════════════════════════════════════════════════════
+//  SCHEDULED SESSION HANDLING
+// ════════════════════════════════════════════════════════
+function updateScheduledSessionDisplay(data) {
+  const scheduledInfo = document.getElementById('scheduledInfo');
+  const scheduleTitle = document.getElementById('scheduleTitle');
+  const scheduleTime = document.getElementById('scheduleTime');
+  
+  if (data.is_scheduled && data.schedule_title) {
+    scheduledInfo.style.display = 'block';
+    scheduleTitle.textContent = data.schedule_title;
+    
+    if (data.schedule_date && data.schedule_time) {
+      const schedDate = new Date(data.schedule_date + 'T' + data.schedule_time);
+      scheduleTime.textContent = `Scheduled for ${schedDate.toLocaleDateString()} at ${schedDate.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`;
+    } else {
+      scheduleTime.textContent = 'Auto-started from schedule';
+    }
+    
+    // Disable parameter controls for scheduled sessions
+    document.getElementById('tempRange').disabled = true;
+    document.getElementById('humRange').disabled = true;
+    document.getElementById('tempRange').style.opacity = '0.5';
+    document.getElementById('humRange').style.opacity = '0.5';
+  } else {
+    scheduledInfo.style.display = 'none';
+    
+    // Enable parameter controls for manual sessions
+    document.getElementById('tempRange').disabled = false;
+    document.getElementById('humRange').disabled = false;
+    document.getElementById('tempRange').style.opacity = '1';
+    document.getElementById('humRange').style.opacity = '1';
+  }
+}
+
+function updateDryingProgressDisplay(data) {
+  const sessionTimer = document.getElementById('sessionTimer');
+  const timerLabel = document.getElementById('timerLabel');
+  const elapsedTime = document.getElementById('elapsedTime');
+  const stopBtn = document.getElementById('stopBtn');
+  
+  if (sessionRunning) {
+    sessionTimer.style.display = 'block';
+    stopBtn.style.display = 'inline-block';
+    
+    // Update timer label and display based on session type
+    if (data.is_scheduled && data.duration_hours) {
+      timerLabel.textContent = 'Scheduled Session Progress';
+      
+      // Calculate remaining time for scheduled sessions
+      if (data.start_time) {
+        const startTime = new Date(data.start_time.replace(' ', 'T')).getTime();
+        const durationMs = parseFloat(data.duration_hours) * 60 * 60 * 1000;
+        const endTime = startTime + durationMs;
+        const now = Date.now();
+        const remaining = Math.max(0, endTime - now);
+        
+        const remainingHours = Math.floor(remaining / (60 * 60 * 1000));
+        const remainingMins = Math.floor((remaining % (60 * 60 * 1000)) / (60 * 1000));
+        const remainingSecs = Math.floor((remaining % (60 * 1000)) / 1000);
+        
+        elapsedTime.textContent = `${remainingHours.toString().padStart(2,'0')}:${remainingMins.toString().padStart(2,'0')}:${remainingSecs.toString().padStart(2,'0')} left`;
+        elapsedTime.style.color = remaining > 0 ? 'var(--teal)' : 'var(--accent-red)';
+        
+        // Update every second for countdown
+        clearInterval(window.countdownInterval);
+        window.countdownInterval = setInterval(() => {
+          updateDryingProgressDisplay(data);
+        }, 1000);
+      }
+    } else {
+      timerLabel.textContent = 'Session Duration';
+      elapsedTime.style.color = 'var(--teal)';
+      // Elapsed time is handled by startTimer function
+    }
+    
+    // Update set temp/humidity displays
+    document.getElementById('setTempDisp').textContent = `${data.set_temp}°C`;
+    document.getElementById('setHumDisp').textContent = `${data.set_humidity}%`;
+  } else {
+    sessionTimer.style.display = 'none';
+    stopBtn.style.display = 'none';
+    document.getElementById('setTempDisp').textContent = '—';
+    document.getElementById('setHumDisp').textContent = '—';
+    clearInterval(window.countdownInterval);
+  }
+}
+
+// ════════════════════════════════════════════════════════
 //  LIVE POLLING — always-on sensor (no session needed)
 // ════════════════════════════════════════════════════════
 async function pollSensorAlways(){
@@ -1022,7 +1255,7 @@ async function pollSensorAlways(){
 async function pollLiveData(){
   if(!sessionRunning) return;
   try{
-    const j=await(await fetch(`session_api.php?action=get_live_data&proto_id=${PROTO_ID}`)).json();
+    const j=await(await fetch(`../api/session_api.php?action=get_live_data&proto_id=${PROTO_ID}`)).json();
     if(j.status==='success'&&j.data){
       const d=j.data;
       const temp=parseFloat(d.recorded_temp)||0;
@@ -1035,6 +1268,15 @@ async function pollLiveData(){
         startTimer();
       }
       if(!sessionId && d.session_id) sessionId=d.session_id;
+
+      // ── Handle scheduled session info ─────────────────────
+      updateScheduledSessionDisplay(d);
+      
+      // ── Handle cycle count and duration display ─────────────
+      updateSessionTimingDisplay(d);
+      
+      // ── Update drying progress display ─────────────────────
+      updateDryingProgressDisplay(d);
 
       // ── COOLDOWN phase handling ──────────────────────────
       if(d.ctrl_status==='COOLDOWN'){
@@ -1112,12 +1354,14 @@ function updateGaugeArc(id,val,max){
   el.style.strokeDashoffset=Math.max(0,offset);
 }
 
-// ── UPDATED: Fan is heat source, labeled "Fan (Heat)" ──
+// ── UPDATED: Dual hardware support - 2 fans + 2 heaters ──
 function updateHWChips(d){
   const chips=[
-    {label:'Fan (Heat)', on: parseInt(d.fan_state)===1},
-    {label:'Exhaust',    on: parseInt(d.exhaust_state)===1},
-    {label:'Heater',     on: parseInt(d.heater_state)===1},
+    {label:'Fan 1',    on: parseInt(d.fan1_state||d.fan_state)===1},
+    {label:'Fan 2',    on: parseInt(d.fan2_state||0)===1},
+    {label:'Heater 1', on: parseInt(d.heater1_state||d.heater_state)===1},
+    {label:'Heater 2', on: parseInt(d.heater2_state||0)===1},
+    {label:'Exhaust',  on: parseInt(d.exhaust_state)===1},
   ];
   document.getElementById('hwChips').innerHTML=chips.map(c=>
     `<span class="hw-chip"><span class="${c.on?'dot-on':'dot-off'}"></span>${c.label}${c.on?' <b style="color:#4ade80;font-size:9px;">ON</b>':''}</span>`
@@ -1339,6 +1583,7 @@ async function submitSchedule(){
   const time=document.getElementById('sched_time').value;
   const temp=document.getElementById('sched_temp').value;
   const hum=document.getElementById('sched_hum').value;
+  const duration=document.getElementById('sched_duration').value;
   const notes=document.getElementById('sched_notes').value;
   if(!date){ showToast('warning','Date Required','Please choose a schedule date.',3000); return; }
   const fd=new FormData();
@@ -1348,6 +1593,7 @@ async function submitSchedule(){
   fd.append('sched_time',time);
   fd.append('set_temp',temp);
   fd.append('set_hum',hum);
+  fd.append('duration_hours',duration);
   fd.append('notes',notes);
   try{
     const j=await(await fetch('../api/schedule_api.php',{method:'POST',body:fd})).json();
@@ -1419,6 +1665,44 @@ function showEventModal(event){
   document.getElementById('eventModal').style.display='flex';
 }
 function closeEventModal(){ document.getElementById('eventModal').style.display='none'; }
+
+// ══ SESSION TIMING DISPLAY ═══════════════════════════════
+function updateSessionTimingDisplay(d) {
+  const sessionTimer = document.getElementById('sessionTimer');
+  const scheduledDuration = document.getElementById('scheduledDuration');
+  const cycleCount = document.getElementById('cycleCount');
+  
+  if (sessionRunning) {
+    sessionTimer.style.display = 'block';
+    
+    // Show scheduled duration if available
+    if (d.duration_hours) {
+      scheduledDuration.style.display = 'block';
+      document.getElementById('scheduledHours').textContent = `${d.duration_hours}h`;
+    } else {
+      scheduledDuration.style.display = 'none';
+    }
+    
+    // Show cycle count if available
+    if (d.cycle_count !== undefined && d.cycle_count > 0) {
+      cycleCount.style.display = 'block';
+      document.getElementById('cycleNumber').textContent = d.cycle_count;
+    } else {
+      cycleCount.style.display = 'none';
+    }
+    
+    // Update timer label based on session type
+    if (d.duration_hours) {
+      document.getElementById('timerLabel').textContent = 'Elapsed / Scheduled';
+    } else {
+      document.getElementById('timerLabel').textContent = 'Session Duration';
+    }
+  } else {
+    sessionTimer.style.display = 'none';
+    scheduledDuration.style.display = 'none';
+    cycleCount.style.display = 'none';
+  }
+}
 
 // ════════════════════════════════════════════════════════
 //  TOAST
@@ -1499,23 +1783,73 @@ async function pollPrototypeStatus(){
 // ── On page load / refresh: restore active session if one is running ──
 async function checkExistingSession(){
   try{
-    const j=await(await fetch(`session_api.php?action=get_live_data&proto_id=${PROTO_ID}`)).json();
+    console.log('🔍 Checking existing session with PROTO_ID:', PROTO_ID);
+    const j=await(await fetch(`../api/session_api.php?action=get_live_data&proto_id=${PROTO_ID}`)).json();
+    console.log('📡 Session check response:', j);
+    
     if(j.status==='success'&&j.data&&j.data.session_id){
       const d=j.data;
+      console.log('✅ Active session found:', d.session_id);
+      
       sessionRunning=true;
       sessionId=d.session_id;
       currentSetTemp=parseFloat(d.set_temp)||50;
       currentSetHum=parseFloat(d.set_humidity)||30;
       if(d.start_time) startTimeEpoch=new Date(d.start_time.replace(' ','T')).getTime();
+      
       updateControlUI(true,d.set_temp,d.set_humidity);
       updateSessionBadge(true);
+      
+      // Show stop button
+      const stopBtn = document.getElementById('stopBtn');
+      if(stopBtn) stopBtn.style.display = 'inline-block';
+      
+      // Show session timer
+      const sessionTimer = document.getElementById('sessionTimer');
+      if(sessionTimer) sessionTimer.style.display = 'block';
+      
       startTimer();
       pollLiveData();
       showToast('success','Session Restored','Your active drying session was resumed.',3000);
+    } else if(j.status==='error'){
+      // Handle API errors properly - ensure UI shows "not running"
+      console.log('❌ No active session:', j.message);
+      sessionRunning=false;
+      sessionId=null;
+      startTimeEpoch=null;
+      updateControlUI(false);
+      updateSessionBadge(false);
+      
+      // Hide stop button
+      const stopBtn = document.getElementById('stopBtn');
+      if(stopBtn) stopBtn.style.display = 'none';
     }
-  }catch(e){}
+  }catch(e){
+    // Handle network errors - ensure UI shows "not running"  
+    console.log('❌ Network error checking existing session:', e);
+    sessionRunning=false;
+    sessionId=null;
+    startTimeEpoch=null;
+    updateControlUI(false);
+    updateSessionBadge(false);
+    
+    // Hide stop button
+    const stopBtn = document.getElementById('stopBtn');
+    if(stopBtn) stopBtn.style.display = 'none';
+  }
 }
-checkExistingSession();
+
+// Wait for DOM to be ready, then check for existing session
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', function() {
+    console.log('🚀 DOM ready, checking for existing session...');
+    setTimeout(checkExistingSession, 500); // Small delay to ensure everything is initialized
+  });
+} else {
+  // DOM is already loaded
+  console.log('🚀 DOM already ready, checking for existing session...');
+  setTimeout(checkExistingSession, 500);
+}
 </script>
 </body>
 </html>
