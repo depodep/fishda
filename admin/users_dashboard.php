@@ -446,7 +446,7 @@ if (!isset($_SESSION['session_logged'])) {
           <div class="stat-card">
             <div class="stat-icon" style="background:rgba(42,157,143,.1);color:var(--teal)"><i class="fas fa-temperature-high"></i></div>
             <div class="stat-value" id="liveTemp">—</div>
-            <div class="stat-label">Live Temp °C</div>
+            <div class="stat-label" id="tempLabel">Live Temp °C</div>
             <div class="stat-accent" style="background:var(--teal)"></div>
           </div>
         </div>
@@ -454,7 +454,7 @@ if (!isset($_SESSION['session_logged'])) {
           <div class="stat-card">
             <div class="stat-icon" style="background:rgba(82,182,154,.1);color:var(--seafoam)"><i class="fas fa-droplet"></i></div>
             <div class="stat-value" id="liveHum" style="color:var(--seafoam)">—</div>
-            <div class="stat-label">Live Humidity %</div>
+            <div class="stat-label" id="humLabel">Live Humidity %</div>
             <div class="stat-accent" style="background:var(--seafoam)"></div>
           </div>
         </div>
@@ -942,11 +942,14 @@ async function stopSession(){
       updateSessionBadge(false);
       hideBanners();
       
-      // Clear hardware states
+      // Clear hardware states and sensor labels
       updateHWChips({
         fan1_state: 0, fan2_state: 0, 
         heater1_state: 0, heater2_state: 0, 
-        exhaust_state: 0
+        exhaust_state: 0,
+        phase: 'Idle',
+        recorded_temp: null,
+        set_temp: null
       });
       
       showToast('success', '✅ Session Stopped', 'All heating devices turned off. Session data saved.', 5000);
@@ -1289,7 +1292,12 @@ async function pollLiveData(){
         cb.style.display='';
         document.getElementById('cooldownMsg').textContent=
           `Cooling down: ${mins}m ${secs}s remaining. Fan will restart automatically after cooldown.`;
-        updateHWChips({heater_state:0,exhaust_state:0,fan_state:0});
+        updateHWChips({
+          heater_state:0,exhaust_state:0,fan_state:0,
+          phase: 'Cooldown',
+          recorded_temp: temp,
+          set_temp: currentSetTemp
+        });
         if(d.recorded_temp!==null){
           document.getElementById('liveTemp').textContent=temp.toFixed(1);
           document.getElementById('liveHum').textContent=hum.toFixed(1);
@@ -1354,18 +1362,107 @@ function updateGaugeArc(id,val,max){
   el.style.strokeDashoffset=Math.max(0,offset);
 }
 
-// ── UPDATED: Dual hardware support - 2 fans + 2 heaters ──
+// ── ENHANCED: Hardware status with phase-aware descriptions ──
 function updateHWChips(d){
+  const phase = d.phase || 'Idle';
+  const isSession = sessionRunning;
+  const temp = parseFloat(d.recorded_temp) || 0;
+  const targetTemp = parseFloat(d.set_temp) || currentSetTemp;
+  
+  // Determine status context for better descriptions
+  const statusText = getHardwareStatusText(phase, isSession);
+  
+  // Update sensor labels with phase information
+  updateSensorLabels(phase, isSession, temp, targetTemp);
+  
   const chips=[
-    {label:'Fan 1',    on: parseInt(d.fan1_state||d.fan_state)===1},
-    {label:'Fan 2',    on: parseInt(d.fan2_state||0)===1},
-    {label:'Heater 1', on: parseInt(d.heater1_state||d.heater_state)===1},
-    {label:'Heater 2', on: parseInt(d.heater2_state||0)===1},
-    {label:'Exhaust',  on: parseInt(d.exhaust_state)===1},
+    {label:'Fan 1',    on: parseInt(d.fan1_state||d.fan_state)===1, desc: phase === 'Heating' ? '(Heat)' : phase === 'Drying' ? '(Circ)' : ''},
+    {label:'Fan 2',    on: parseInt(d.fan2_state||0)===1, desc: phase === 'Heating' ? '(Heat)' : phase === 'Drying' ? '(Circ)' : ''},
+    {label:'Heater 1', on: parseInt(d.heater1_state||d.heater_state)===1, desc: ''},
+    {label:'Heater 2', on: parseInt(d.heater2_state||0)===1, desc: ''},
+    {label:'Exhaust',  on: parseInt(d.exhaust_state)===1, desc: phase === 'Exhaust' ? '(Cool)' : ''},
   ];
-  document.getElementById('hwChips').innerHTML=chips.map(c=>
-    `<span class="hw-chip"><span class="${c.on?'dot-on':'dot-off'}"></span>${c.label}${c.on?' <b style="color:#4ade80;font-size:9px;">ON</b>':''}</span>`
+  
+  const hwChipsHtml = chips.map(c=>
+    `<span class="hw-chip">
+       <span class="${c.on?'dot-on':'dot-off'}"></span>
+       ${c.label}${c.desc}${c.on?' <b style="color:#4ade80;font-size:9px;">ON</b>':''}
+     </span>`
   ).join('');
+  
+  document.getElementById('hwChips').innerHTML = hwChipsHtml + 
+    `<div style="margin-top:6px;font-size:9px;color:var(--text-muted);text-align:center;">${statusText}</div>`;
+}
+
+// ── Get contextual hardware status description ──
+function getHardwareStatusText(phase, isSession) {
+  if (!isSession) {
+    return '🔌 All devices offline - No active session';
+  }
+  
+  switch(phase) {
+    case 'Heating':
+      return '🔥 Active heating - Fans & heaters working to reach target temperature';
+    case 'Drying': 
+      return '🌬️ Gentle drying - Maintaining temperature with light circulation';
+    case 'Cooldown':
+      return '❄️ Cooling down - All heating devices off, 5-minute rest period';
+    case 'Exhaust':
+      return '💨 Exhaust mode - Removing excess heat to prevent overheating';
+    case 'Idle':
+      return '⏸️ Session paused - Awaiting next heating cycle';
+    default:
+      return `📊 ${phase} mode - Session active`;
+  }
+}
+
+// ── Update live sensor labels with phase information ──
+function updateSensorLabels(phase, isSession, temp, targetTemp) {
+  const tempLabel = document.getElementById('tempLabel');
+  const humLabel = document.getElementById('humLabel');
+  
+  if (!isSession) {
+    tempLabel.textContent = 'Live Temp °C • Offline';
+    humLabel.textContent = 'Live Humidity % • Offline';
+    return;
+  }
+  
+  let tempStatus = '';
+  let humStatus = '';
+  
+  switch(phase) {
+    case 'Heating':
+      if (temp && targetTemp) {
+        const diff = targetTemp - temp;
+        tempStatus = diff > 10 ? '• Heating Up' : '• Near Target';
+      } else {
+        tempStatus = '• Heating';
+      }
+      humStatus = '• Active Session';
+      break;
+    case 'Drying':
+      tempStatus = '• Maintaining';
+      humStatus = '• Reducing';
+      break;
+    case 'Cooldown':
+      tempStatus = '• Cooling Down';
+      humStatus = '• Rest Period';
+      break;
+    case 'Exhaust':
+      tempStatus = '• Exhausting';
+      humStatus = '• Cooling';
+      break;
+    case 'Idle':
+      tempStatus = '• Session Paused';
+      humStatus = '• Session Paused';
+      break;
+    default:
+      tempStatus = `• ${phase}`;
+      humStatus = `• ${phase}`;
+  }
+  
+  tempLabel.textContent = `Live Temp °C ${tempStatus}`;
+  humLabel.textContent = `Live Humidity % ${humStatus}`;
 }
 
 // ── UPDATED: Drying phase + Cooldown phase added ────────

@@ -289,12 +289,17 @@ void logSensorData(float temperature, float humidity, int sessionId) {
 
       controlRelays(heater, exhaust, fan);
 
-      Serial.print("🔌 Relays → H:");
+      // Enhanced debug output 
+      Serial.print("📊 Server Commands → H:");
       Serial.print(heater);
       Serial.print(" E:");
       Serial.print(exhaust);
       Serial.print(" F:");
-      Serial.println(fan);
+      Serial.print(fan);
+      Serial.print(" | Phase: ");
+      Serial.print(data["phase"] | "Unknown");
+      Serial.print(" | Cmd: ");
+      Serial.println(data["command"] | "None");
     }
   } else {
     Serial.print("❌ Log Error: ");
