@@ -549,6 +549,31 @@ if (!isset($_SESSION['session_logged'])) {
                   <div style="font-weight:700;color:var(--seafoam)" id="setHumDisp">—</div>
                 </div>
               </div>
+
+              <!-- Hardware Status Card -->
+              <div style="background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.2);border-radius:8px;padding:10px;margin-top:12px;display:none;" id="hwStatusCard">
+                <div style="font-size:10px;color:var(--text-muted);margin-bottom:8px;font-weight:600;text-transform:uppercase;">⚡ Hardware Status</div>
+                <div class="row g-2" style="font-size:11px;">
+                  <div class="col-4">
+                    <div style="display:flex;align-items:center;gap:4px;padding:6px;background:rgba(0,0,0,.05);border-radius:4px;">
+                      <span style="width:8px;height:8px;border-radius:50%;background:#ccc;display:inline-block;" id="hwHeater"></span>
+                      <span id="hwHeaterLabel">Heater</span>
+                    </div>
+                  </div>
+                  <div class="col-4">
+                    <div style="display:flex;align-items:center;gap:4px;padding:6px;background:rgba(0,0,0,.05);border-radius:4px;">
+                      <span style="width:8px;height:8px;border-radius:50%;background:#ccc;display:inline-block;" id="hwFan"></span>
+                      <span id="hwFanLabel">Fan</span>
+                    </div>
+                  </div>
+                  <div class="col-4">
+                    <div style="display:flex;align-items:center;gap:4px;padding:6px;background:rgba(0,0,0,.05);border-radius:4px;">
+                      <span style="width:8px;height:8px;border-radius:50%;background:#ccc;display:inline-block;" id="hwExhaust"></span>
+                      <span id="hwExhaustLabel">Exhaust</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -1140,6 +1165,27 @@ function startTimer(){
   },1000);
 }
 
+// ── Update timer to show cooldown countdown ──
+let cooldownCountdownInterval=null;
+function showCooldownCountdown(remainingSeconds){
+  clearInterval(cooldownCountdownInterval);
+  const timerEl = document.getElementById('elapsedTime');
+  if(!timerEl) return;
+
+  cooldownCountdownInterval = setInterval(()=>{
+    remainingSeconds--;
+    if(remainingSeconds < 0) {
+      clearInterval(cooldownCountdownInterval);
+      startTimer(); // Resume normal timer
+      return;
+    }
+    const h = Math.floor(remainingSeconds/3600).toString().padStart(2,'0');
+    const m = Math.floor((remainingSeconds%3600)/60).toString().padStart(2,'0');
+    const s = (remainingSeconds%60).toString().padStart(2,'0');
+    timerEl.textContent = `${h}:${m}:${s}`;
+  }, 1000);
+}
+
 // ════════════════════════════════════════════════════════
 //  SCHEDULED SESSION HANDLING
 // ════════════════════════════════════════════════════════
@@ -1233,22 +1279,28 @@ function updateDryingProgressDisplay(data) {
 // ════════════════════════════════════════════════════════
 async function pollSensorAlways(){
   try{
-    const j=await(await fetch('../api/controls_api.php?action=get_live_sensor')).json();
-    if(j.status==='success'&&j.data&&j.data.temperature!==null){
-      const t=parseFloat(j.data.temperature);
-      const h=parseFloat(j.data.humidity);
-      document.getElementById('liveTemp').textContent=t.toFixed(1);
-      document.getElementById('liveHum').textContent=h.toFixed(1);
-      if(document.getElementById('gaugeTemp')){
-        document.getElementById('gaugeTemp').textContent=t.toFixed(1);
-        document.getElementById('gaugeHum').textContent=h.toFixed(1);
-        updateGaugeArc('tempArc',t,80);
-        updateGaugeArc('humArc',h,100);
+    // Always poll live sensor data, even when idle
+    const j=await(await fetch(`../api/session_api.php?action=get_live_data&proto_id=${PROTO_ID}`)).json();
+    if(j.status==='success'&&j.data){
+      const d=j.data;
+      const t=parseFloat(d.recorded_temp);
+      const h=parseFloat(d.recorded_humidity);
+
+      // Show live data (even if idle) — display if we have any sensor data
+      if(d.recorded_temp !== null && !isNaN(t)){
+        document.getElementById('liveTemp').textContent=t.toFixed(1);
+        document.getElementById('liveHum').textContent=h.toFixed(1);
+        if(document.getElementById('gaugeTemp')){
+          document.getElementById('gaugeTemp').textContent=t.toFixed(1);
+          document.getElementById('gaugeHum').textContent=h.toFixed(1);
+          updateGaugeArc('tempArc',t,80);
+          updateGaugeArc('humArc',h,100);
+        }
+        updateMiniChart(t,h);
       }
-      updateMiniChart(t,h);
     }
   }catch(e){}
-  setTimeout(pollSensorAlways, 5000);
+  setTimeout(pollSensorAlways, 3000);
 }
 
 // ════════════════════════════════════════════════════════
@@ -1292,8 +1344,11 @@ async function pollLiveData(){
         cb.style.display='';
         document.getElementById('cooldownMsg').textContent=
           `Cooling down: ${mins}m ${secs}s remaining. Fan will restart automatically after cooldown.`;
+
+        // ── Show cooldown countdown in SESSION DURATION ──
+        showCooldownCountdown(rem);
         updateHWChips({
-          heater_state:0,exhaust_state:0,fan_state:0,
+          fan1:0, fan2:0,
           phase: 'Cooldown',
           recorded_temp: temp,
           set_temp: currentSetTemp
@@ -1317,6 +1372,8 @@ async function pollLiveData(){
 
       // ── Normal running phase ─────────────────────────────
       document.getElementById('cooldownBanner').style.display='none';
+      clearInterval(cooldownCountdownInterval); // Stop cooldown countdown if running
+      startTimer(); // Resume normal elapsed time timer
 
       if(d.recorded_temp!==null){
         document.getElementById('liveTemp').textContent=temp.toFixed(1);
@@ -1368,30 +1425,52 @@ function updateHWChips(d){
   const isSession = sessionRunning;
   const temp = parseFloat(d.recorded_temp) || 0;
   const targetTemp = parseFloat(d.set_temp) || currentSetTemp;
-  
+
   // Determine status context for better descriptions
   const statusText = getHardwareStatusText(phase, isSession);
-  
+
   // Update sensor labels with phase information
   updateSensorLabels(phase, isSession, temp, targetTemp);
-  
+
   const chips=[
-    {label:'Fan 1',    on: parseInt(d.fan1_state||d.fan_state)===1, desc: phase === 'Heating' ? '(Heat)' : phase === 'Drying' ? '(Circ)' : ''},
-    {label:'Fan 2',    on: parseInt(d.fan2_state||0)===1, desc: phase === 'Heating' ? '(Heat)' : phase === 'Drying' ? '(Circ)' : ''},
-    {label:'Heater 1', on: parseInt(d.heater1_state||d.heater_state)===1, desc: ''},
-    {label:'Heater 2', on: parseInt(d.heater2_state||0)===1, desc: ''},
-    {label:'Exhaust',  on: parseInt(d.exhaust_state)===1, desc: phase === 'Exhaust' ? '(Cool)' : ''},
+    {label:'Fan 1',    on: parseInt(d.fan1||0)===1, desc: phase === 'Heating' ? '(Heat)' : phase === 'Drying' ? '(Circ)' : ''},
+    {label:'Fan 2',    on: parseInt(d.fan2||0)===1, desc: phase === 'Heating' ? '(Heat)' : phase === 'Drying' ? '(Circ)' : ''},
   ];
-  
+
   const hwChipsHtml = chips.map(c=>
     `<span class="hw-chip">
        <span class="${c.on?'dot-on':'dot-off'}"></span>
        ${c.label}${c.desc}${c.on?' <b style="color:#4ade80;font-size:9px;">ON</b>':''}
      </span>`
   ).join('');
-  
-  document.getElementById('hwChips').innerHTML = hwChipsHtml + 
-    `<div style="margin-top:6px;font-size:9px;color:var(--text-muted);text-align:center;">${statusText}</div>`;
+
+  // Update hardware status card in drying progress
+  updateHardwareStatusCard(d);
+}
+
+// ── Update hardware status indicators in DRYING PROGRESS card ──
+function updateHardwareStatusCard(d) {
+  const hwCard = document.getElementById('hwStatusCard');
+  if (!hwCard) return;
+
+  const fan1On = parseInt(d.fan1 || 0) === 1;
+  const fan2On = parseInt(d.fan2 || 0) === 1;
+
+  // Update dot colors and labels
+  const fan1Dot = document.getElementById('hwHeater');
+  const fan2Dot = document.getElementById('hwFan');
+  const exhaustDot = document.getElementById('hwExhaust');
+
+  fan1Dot.style.background = fan1On ? '#3b82f6' : '#d1d5db';
+  fan2Dot.style.background = fan2On ? '#3b82f6' : '#d1d5db';
+  exhaustDot.style.background = '#d1d5db';  // Not used, hide
+  exhaustDot.parentElement.style.display = 'none';
+
+  document.getElementById('hwHeaterLabel').textContent = fan1On ? '💨 Fan 1' : 'Fan 1';
+  document.getElementById('hwFanLabel').textContent = fan2On ? '💨 Fan 2' : 'Fan 2';
+
+  // Show card only during active session
+  hwCard.style.display = sessionRunning ? '' : 'none';
 }
 
 // ── Get contextual hardware status description ──
@@ -1399,18 +1478,16 @@ function getHardwareStatusText(phase, isSession) {
   if (!isSession) {
     return '🔌 All devices offline - No active session';
   }
-  
+
   switch(phase) {
     case 'Heating':
-      return '🔥 Active heating - Fans & heaters working to reach target temperature';
-    case 'Drying': 
-      return '🌬️ Gentle drying - Maintaining temperature with light circulation';
+      return '🔥 Active heating - Fans working to reach target temperature';
+    case 'Drying':
+      return '🌬️ Gentle drying - Fans maintaining temperature with circulation';
     case 'Cooldown':
-      return '❄️ Cooling down - All heating devices off, 5-minute rest period';
-    case 'Exhaust':
-      return '💨 Exhaust mode - Removing excess heat to prevent overheating';
+      return '❄️ Cooling down - Fans off, rest period before next cycle';
     case 'Idle':
-      return '⏸️ Session paused - Awaiting next heating cycle';
+      return '⏸️ Session paused - Awaiting next cycle';
     default:
       return `📊 ${phase} mode - Session active`;
   }
@@ -1422,8 +1499,8 @@ function updateSensorLabels(phase, isSession, temp, targetTemp) {
   const humLabel = document.getElementById('humLabel');
   
   if (!isSession) {
-    tempLabel.textContent = 'Live Temp °C • Offline';
-    humLabel.textContent = 'Live Humidity % • Offline';
+    tempLabel.textContent = 'Live Temp °C';
+    humLabel.textContent = 'Live Humidity %';
     return;
   }
   
@@ -1864,6 +1941,7 @@ if('Notification' in window && Notification.permission==='default'){
 // ════════════════════════════════════════════════════════
 initLiveChart();
 document.getElementById('elapsedTime').textContent='00:00:00';
+checkExistingSession();  // ← CHECK FOR EXISTING SESSION ON PAGE LOAD
 pollSensorAlways();
 pollPrototypeStatus();
 protoStatusTimer=setInterval(pollPrototypeStatus,5000);
@@ -1883,31 +1961,60 @@ async function checkExistingSession(){
     console.log('🔍 Checking existing session with PROTO_ID:', PROTO_ID);
     const j=await(await fetch(`../api/session_api.php?action=get_live_data&proto_id=${PROTO_ID}`)).json();
     console.log('📡 Session check response:', j);
-    
-    if(j.status==='success'&&j.data&&j.data.session_id){
+
+    if(j.status==='success'&&j.data){
       const d=j.data;
-      console.log('✅ Active session found:', d.session_id);
-      
-      sessionRunning=true;
-      sessionId=d.session_id;
-      currentSetTemp=parseFloat(d.set_temp)||50;
-      currentSetHum=parseFloat(d.set_humidity)||30;
-      if(d.start_time) startTimeEpoch=new Date(d.start_time.replace(' ','T')).getTime();
-      
-      updateControlUI(true,d.set_temp,d.set_humidity);
-      updateSessionBadge(true);
-      
-      // Show stop button
-      const stopBtn = document.getElementById('stopBtn');
-      if(stopBtn) stopBtn.style.display = 'inline-block';
-      
-      // Show session timer
-      const sessionTimer = document.getElementById('sessionTimer');
-      if(sessionTimer) sessionTimer.style.display = 'block';
-      
-      startTimer();
-      pollLiveData();
-      showToast('success','Session Restored','Your active drying session was resumed.',3000);
+
+      // Display idle sensor data (even if no active session)
+      if(d.recorded_temp!==null && d.recorded_temp!==''){
+        document.getElementById('liveTemp').textContent=parseFloat(d.recorded_temp).toFixed(1);
+        document.getElementById('liveHum').textContent=parseFloat(d.recorded_humidity).toFixed(1);
+        if(document.getElementById('gaugeTemp')){
+          document.getElementById('gaugeTemp').textContent=parseFloat(d.recorded_temp).toFixed(1);
+          document.getElementById('gaugeHum').textContent=parseFloat(d.recorded_humidity).toFixed(1);
+          updateGaugeArc('tempArc',parseFloat(d.recorded_temp),80);
+          updateGaugeArc('humArc',parseFloat(d.recorded_humidity),100);
+        }
+        updateMiniChart(parseFloat(d.recorded_temp), parseFloat(d.recorded_humidity));
+      }
+
+      // Check if there's an active session
+      if(d.session_id){
+        console.log('✅ Active session found:', d.session_id);
+
+        sessionRunning=true;
+        sessionId=d.session_id;
+        currentSetTemp=parseFloat(d.set_temp)||50;
+        currentSetHum=parseFloat(d.set_humidity)||30;
+        if(d.start_time) startTimeEpoch=new Date(d.start_time.replace(' ','T')).getTime();
+
+        updateControlUI(true,d.set_temp,d.set_humidity);
+        updateSessionBadge(true);
+
+        // Show stop button
+        const stopBtn = document.getElementById('stopBtn');
+        if(stopBtn) stopBtn.style.display = 'inline-block';
+
+        // Show session timer
+        const sessionTimer = document.getElementById('sessionTimer');
+        if(sessionTimer) sessionTimer.style.display = 'block';
+
+        startTimer();
+        pollLiveData();
+        showToast('success','Session Restored','Your active drying session was resumed.',3000);
+      } else {
+        // Idle state - no active session but sensor data available
+        console.log('⏸ Idle state - no active session');
+        sessionRunning=false;
+        sessionId=null;
+        startTimeEpoch=null;
+        updateControlUI(false);
+        updateSessionBadge(false);
+
+        // Hide stop button
+        const stopBtn = document.getElementById('stopBtn');
+        if(stopBtn) stopBtn.style.display = 'none';
+      }
     } else if(j.status==='error'){
       // Handle API errors properly - ensure UI shows "not running"
       console.log('❌ No active session:', j.message);
@@ -1916,20 +2023,20 @@ async function checkExistingSession(){
       startTimeEpoch=null;
       updateControlUI(false);
       updateSessionBadge(false);
-      
+
       // Hide stop button
       const stopBtn = document.getElementById('stopBtn');
       if(stopBtn) stopBtn.style.display = 'none';
     }
   }catch(e){
-    // Handle network errors - ensure UI shows "not running"  
+    // Handle network errors - ensure UI shows "not running"
     console.log('❌ Network error checking existing session:', e);
     sessionRunning=false;
     sessionId=null;
     startTimeEpoch=null;
     updateControlUI(false);
     updateSessionBadge(false);
-    
+
     // Hide stop button
     const stopBtn = document.getElementById('stopBtn');
     if(stopBtn) stopBtn.style.display = 'none';

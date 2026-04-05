@@ -37,14 +37,17 @@ if ($temp <= 0 || $humidity <= 0) {
 
 // ── 1. Update live cache FIRST (for instant display) ─────────
 try {
+    // Update prototype heartbeat — keeps device marked as ONLINE
+    $dbh->query("UPDATE tbl_prototypes SET updated_at=NOW() WHERE id=1");
+
     // Always update the live cache — this is what dashboard displays
     $dbh->prepare(
-        "UPDATE live_sensor_cache 
-         SET temperature = :t, humidity = :h, 
-             fan1_state = :f1, fan2_state = :f2, 
-             heater1_state = :h1, heater2_state = :h2, 
-             exhaust_state = :e, phase = :p, 
-             timestamp = NOW() 
+        "UPDATE live_sensor_cache
+         SET temperature = :t, humidity = :h,
+             fan1_state = :f1, fan2_state = :f2,
+             heater1_state = :h1, heater2_state = :h2,
+             exhaust_state = :e, phase = :p,
+             timestamp = NOW()
          WHERE id = 1"
     )->execute([
         ':t' => $temp, ':h' => $humidity,
@@ -79,7 +82,7 @@ try {
 
 // ── 4. No active session → STOPPED (but data is cached) ──────
 if (!$activeSession) {
-    sendResponse('success', 'No active session. Standby. (Data cached for display)', [
+    sendResponse('success', '✅ Device online (heartbeat received) - No active session. Standby.', [
         'command'      => 'STOP',
         'heater'       => 0,
         'exhaust'      => 0,
@@ -120,7 +123,7 @@ if ($ctrl_status === 'COOLDOWN' && $cooldown_until) {
             )->execute([':sid' => $sid, ':temp' => $temp, ':hum' => $humidity]);
         } catch (Exception $e) {}
 
-        sendResponse('success', 'Cooldown phase.', [
+    sendResponse('success', '✅ Device online (heartbeat received) - Cooldown phase.', [
             'command'          => 'COOLDOWN',
             'heater'           => 0,
             'exhaust'          => 0,
@@ -218,6 +221,20 @@ if ($temp >= $AUTOSTOP_THRESHOLD) {
     $heater1_state = 0; $heater2_state = 0; // No heating needed
     $exhaust_state = 0;
     $phase = 'Drying';
+
+    // ── Check if TEMPERATURE target reached — trigger COOLDOWN ──────────
+    // Temperature usually stabilizes first; humidity may take longer
+    if ($temp >= $target_temp - 1 && $temp <= $target_temp + 1) {
+        // Temperature reached! Start 5-minute cooldown
+        $cooldown_until = date('Y-m-d H:i:s', strtotime('+5 minutes'));
+        $dbh->prepare("UPDATE drying_controls SET status='COOLDOWN', cooldown_until=:until WHERE id=1")
+            ->execute([':until' => $cooldown_until]);
+
+        $phase = 'Cooldown';
+        $fan1_state = 0;
+        $fan2_state = 0;
+        $command = 'COOLDOWN';
+    }
 }
 
 // Update legacy variables for backward compatibility
@@ -288,7 +305,7 @@ if (!$auto_stopped) {
     }
 }
 
-sendResponse('success', 'Reading processed.', [
+sendResponse('success', '✅ Device online (heartbeat received) - Reading processed.', [
     'command'      => $command,
     'heater'       => $heater_state,      // Legacy compatibility
     'exhaust'      => $exhaust_state,
