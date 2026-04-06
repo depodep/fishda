@@ -442,12 +442,9 @@ if (!isset($_SESSION['session_logged'])) {
         
         </div>
 
-        <!-- Right Cards: 2x2 Grid -->
-        <div class="col-lg-6">
+         <div class="col-lg-6">
           <div class="row g-3">
-            <!-- Session Duration Card -->
-
-            <!-- Temperature Display Card -->
+ 
             <div class="col-6">
               <div class="stat-card" style="min-height:130px;">
                 <div class="stat-icon" style="background:rgba(42,157,143,.15);color:var(--teal)"><i class="fas fa-temperature-high"></i></div>
@@ -474,8 +471,7 @@ if (!isset($_SESSION['session_logged'])) {
               </div>
             </div>
 
-                <!-- Humidity Display Card -->
-            <div class="col-6">
+             <div class="col-6">
               <div class="stat-card" style="min-height:130px;">
                 <div class="stat-icon" style="background:rgba(46,196,182,.15);color:var(--seafoam)"><i class="fas fa-droplet"></i></div>
                 <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;font-weight:600;">HUMIDITY</div>
@@ -1292,21 +1288,24 @@ async function pollSensorAlways(){
       const d=j.data;
       const isOnline = d.device_online !== false; // true if online or not specified
       
-      if(isOnline && d.recorded_temp !== null){
+      // Display data if we have recorded_temp, regardless of online status
+      // (stale data is better than no data)
+      if(d.recorded_temp !== null){
         const t=parseFloat(d.recorded_temp);
         const h=parseFloat(d.recorded_humidity);
-        console.log(`🌡 Temp: ${t}°C, 💧 Hum: ${h}%, Phase: ${d.phase}`);
+        const dataAge = d.data_age_seconds ?? 'unknown';
+        console.log(`🌡 Temp: ${t}°C, 💧 Hum: ${h}%, Phase: ${d.phase}, Data age: ${dataAge}s`);
 
         document.getElementById('liveTemp').textContent=t.toFixed(1);
         document.getElementById('liveHum').textContent=h.toFixed(1);
         
-        // Update device status indicator
-        updateDeviceStatus(true);
+        // Update device status indicator (reflects actual online state)
+        updateDeviceStatus(isOnline);
         updateMiniChart(t,h);
-        console.log('✅ UI updated successfully');
+        console.log('✅ UI updated successfully' + (!isOnline ? ' (stale data)' : ''));
       } else {
-        // Device offline or no data
-        console.log('⚠️ Device offline or no sensor data');
+        // No data available at all
+        console.log('⚠️ No sensor data available');
         document.getElementById('liveTemp').textContent='—';
         document.getElementById('liveHum').textContent='—';
         updateDeviceStatus(false);

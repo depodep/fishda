@@ -556,23 +556,25 @@ switch ($action) {
                     $isOnline = ($age >= 0 && $age < 30);
                 }
 
-                if ($liveCache && $liveCache['temperature'] !== null && $isOnline) {
-                    sendResponse('success', 'Idle state - showing live sensor data.', [
+                // Always show sensor data if it exists, even if stale (device will be marked offline)
+                if ($liveCache && $liveCache['temperature'] !== null) {
+                    sendResponse('success', $isOnline ? 'Idle state - showing live sensor data.' : 'Idle state - showing stale sensor data (device may be offline).', [
                         'recorded_temp'      => floatval($liveCache['temperature']),
                         'recorded_humidity'  => floatval($liveCache['humidity']),
-                        'phase'              => 'Idle',
-                        'heater_state'       => (int)$liveCache['heater1_state'],
-                        'fan_state'          => (int)$liveCache['fan1_state'],
-                        'fan1_state'         => (int)$liveCache['fan1_state'],
-                        'fan2_state'         => (int)$liveCache['fan2_state'],
-                        'exhaust_state'      => (int)$liveCache['exhaust_state'],
+                        'phase'              => $liveCache['phase'] ?? 'Idle',
+                        'heater_state'       => (int)($liveCache['heater1_state'] ?? 0),
+                        'fan_state'          => (int)($liveCache['fan1_state'] ?? 0),
+                        'fan1_state'         => (int)($liveCache['fan1_state'] ?? 0),
+                        'fan2_state'         => (int)($liveCache['fan2_state'] ?? 0),
+                        'exhaust_state'      => (int)($liveCache['exhaust_state'] ?? 0),
                         'session_id'         => null,
                         'set_temp'           => null,
                         'set_humidity'       => null,
                         'start_time'         => null,
                         'ctrl_status'        => 'IDLE',
                         'cooldown_remaining' => 0,
-                        'device_online'      => true,
+                        'device_online'      => $isOnline,
+                        'data_age_seconds'   => $liveCache['age_seconds'] ?? null,
                     ]);
                 } else {
                     // No sensor data OR device offline (stale data)

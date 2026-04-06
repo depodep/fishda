@@ -41,14 +41,24 @@ try {
     $dbh->query("UPDATE tbl_prototypes SET updated_at=NOW() WHERE id=1");
 
     // Always update the live cache — this is what dashboard displays
+    // Use provided state values or default to 0 (OFF)
+    $fan1_state = intval($_POST['fan1'] ?? $_GET['fan1'] ?? 0);
+    $fan2_state = intval($_POST['fan2'] ?? $_GET['fan2'] ?? 0);
+    $heater1_state = intval($_POST['heater1'] ?? $_GET['heater1'] ?? 0);
+    $heater2_state = intval($_POST['heater2'] ?? $_GET['heater2'] ?? 0);
+    $exhaust_state = intval($_POST['exhaust'] ?? $_GET['exhaust'] ?? 0);
+    $phase = trim($_POST['phase'] ?? $_GET['phase'] ?? 'Idle');
+    
     $dbh->prepare(
-        "UPDATE live_sensor_cache
-         SET temperature = :t, humidity = :h,
-             fan1_state = :f1, fan2_state = :f2,
-             heater1_state = :h1, heater2_state = :h2,
-             exhaust_state = :e, phase = :p,
-             timestamp = NOW()
-         WHERE id = 1"
+        "INSERT INTO live_sensor_cache 
+         (id, temperature, humidity, fan1_state, fan2_state, heater1_state, heater2_state, exhaust_state, phase, timestamp)
+         VALUES (1, :t, :h, :f1, :f2, :h1, :h2, :e, :p, NOW())
+         ON DUPLICATE KEY UPDATE
+         temperature = :t, humidity = :h,
+         fan1_state = :f1, fan2_state = :f2,
+         heater1_state = :h1, heater2_state = :h2,
+         exhaust_state = :e, phase = :p,
+         timestamp = NOW()"
     )->execute([
         ':t' => $temp, ':h' => $humidity,
         ':f1' => $fan1_state, ':f2' => $fan2_state,
@@ -337,24 +347,21 @@ if ($temp >= $AUTOSTOP_THRESHOLD) {
     ];
 
  } elseif ($temp >= $CRITICAL_THRESHOLD) {
-    // Critical overheat — exhaust only, all heating devices OFF
-    $exhaust_state = 1; 
+     $exhaust_state = 1; 
     $fan1_state = 0; $fan2_state = 0;
     $heater1_state = 0; $heater2_state = 0;
     $phase = 'Exhaust';
     $alert = ['level' => 'critical', 'title' => 'CRITICAL OVERHEAT', 'message' => "Temp {$temp}°C is critical!"];
 
 } elseif ($temp >= $OVERHEAT_THRESHOLD) {
-    // Mild overheat — exhaust, fans OFF
-    $exhaust_state = 1; 
+     $exhaust_state = 1; 
     $fan1_state = 0; $fan2_state = 0;
     $heater1_state = 0; $heater2_state = 0;
     $phase = 'Exhaust';
     $alert = ['level' => 'warning', 'title' => 'Overheating', 'message' => "Temp {$temp}°C exceeds target {$target_temp}°C."];
 
 } elseif ($temp <= $UNDERHEAT_THRESHOLD) {
-    // ── HEATING: Both fans + heaters ON for maximum heat ──────
-    $fan1_state = 1; $fan2_state = 1;     // Both fans for circulation
+     $fan1_state = 1; $fan2_state = 1;     
     $heater1_state = 1; $heater2_state = 1; // Both heaters for heat
     $exhaust_state = 0;
     $phase = 'Heating';
@@ -368,7 +375,7 @@ if ($temp >= $AUTOSTOP_THRESHOLD) {
 
     // ── Check if TEMPERATURE target reached — trigger COOLDOWN ──────────
     // Temperature usually stabilizes first; humidity may take longer
-    if ($temp >= $target_temp - 1 && $temp <= $target_temp + 1) {
+    if ($temp >= $target_temp) {
         // Temperature reached! Start 5-minute cooldown
         $cooldown_until = date('Y-m-d H:i:s', strtotime('+5 minutes'));
         $dbh->prepare("UPDATE drying_controls SET status='COOLDOWN', cooldown_until=:until WHERE id=1")
