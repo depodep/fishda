@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Manual Session Stop</title>
+</head>
+<body>
+    <h1>Emergency Session Stop</h1>
+    <button onclick="stopSession()">STOP SESSION NOW</button>
+    <div id="result"></div>
+
+    <script>
+    function stopSession() {
+        fetch('/fishda/api/controls_api.php', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: 'action=emergency_stop'
+        })
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('result').innerHTML = 
+                '<p>Result: ' + data.status + ' - ' + data.message + '</p>';
+        })
+        .catch(error => {
+            document.getElementById('result').innerHTML = 
+                '<p>Error: ' + error + '</p>';
+        });
+    }
+    </script>
+</body>
+</html>

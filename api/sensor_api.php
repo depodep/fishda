@@ -62,8 +62,13 @@ try {
 // ── 2. Check for active session ───────────────────────────────
 try {
     $sessStmt = $dbh->query(
-        "SELECT session_id, set_temp, set_humidity FROM drying_sessions
-         WHERE status='Running' ORDER BY start_time DESC LIMIT 1"
+        "SELECT ds.session_id, ds.set_temp, ds.set_humidity, ds.start_time, ds.schedule_id,
+                bs.duration_hours,
+                TIMESTAMPDIFF(MINUTE, ds.start_time, NOW()) AS elapsed_minutes
+         FROM drying_sessions ds
+         LEFT JOIN batch_schedules bs ON ds.schedule_id = bs.id
+         WHERE ds.status='Running'
+         ORDER BY ds.start_time DESC LIMIT 1"
     );
     $activeSession = $sessStmt->fetch(PDO::FETCH_ASSOC);
     $session_id    = $activeSession ? (int)$activeSession['session_id'] : null;
@@ -80,8 +85,131 @@ try {
     sendResponse('error', 'DB operation failed: ' . $e->getMessage());
 }
 
-// ── 4. No active session → STOPPED (but data is cached) ──────
+// ── 2b. If session is running & scheduled, auto-stop when duration reached ──
+if ($activeSession && !empty($activeSession['schedule_id']) && $activeSession['duration_hours'] !== null) {
+    $elapsedMinutes  = (int)($activeSession['elapsed_minutes'] ?? 0);
+    $durationMinutes = (int)round(floatval($activeSession['duration_hours']) * 60);
+
+    if ($durationMinutes > 0 && $elapsedMinutes >= $durationMinutes) {
+        try {
+            $dbh->beginTransaction();
+
+            // 1. Mark session as completed
+            $stopStmt = $dbh->prepare("UPDATE drying_sessions SET status='Completed', end_time=NOW() WHERE session_id=:sid");
+            $stopStmt->execute([':sid' => $session_id]);
+
+            // 2. Mark schedule as done
+            $schedUpd = $dbh->prepare("UPDATE batch_schedules SET status='Done', last_checked=NOW() WHERE id=:sid");
+            $schedUpd->execute([':sid' => $activeSession['schedule_id']]);
+
+            // 3. Reset drying_controls to IDLE
+            $ctrlUpd = $dbh->prepare("UPDATE drying_controls SET status='IDLE', cooldown_until=NULL WHERE id=1");
+            $ctrlUpd->execute();
+
+            $dbh->commit();
+        } catch (Exception $e) {
+            $dbh->rollBack();
+            error_log('Auto-stop schedule failed: ' . $e->getMessage());
+        }
+
+        // Tell device to stop — session finished by duration
+        sendResponse('success', '⏹ Scheduled duration reached — session auto-stopped.', [
+            'command'      => 'STOP',
+            'heater'       => 0,
+            'heater1'      => 0,
+            'heater2'      => 0,
+            'exhaust'      => 0,
+            'fan'          => 0,
+            'fan1'         => 0,
+            'fan2'         => 0,
+            'phase'        => 'Completed',
+            'session_id'   => $session_id,
+            'target_temp'  => floatval($activeSession['set_temp']),
+            'target_hum'   => floatval($activeSession['set_humidity']),
+            'duration_hours' => floatval($activeSession['duration_hours']),
+            'auto_stopped' => true,
+        ]);
+    }
+}
+
+// ── 4. No active session → Check for scheduled batch to auto-start ──────
 if (!$activeSession) {
+    // Check if there's a scheduled batch that should start now
+    try {
+        $schedCheck = $dbh->query("
+            SELECT id, user_id, title, sched_date, sched_time, 
+                   set_temp, set_humidity, duration_hours, notes
+            FROM batch_schedules
+            WHERE status = 'Scheduled'
+            AND CONCAT(sched_date, ' ', sched_time) <= NOW()
+            ORDER BY CONCAT(sched_date, ' ', sched_time) ASC
+            LIMIT 1
+        ");
+        $pendingSchedule = $schedCheck->fetch(PDO::FETCH_ASSOC);
+        
+        if ($pendingSchedule) {
+            // Auto-start this scheduled session!
+            $dbh->beginTransaction();
+            
+            // 1. Create new drying session
+            $sessionStmt = $dbh->prepare("
+                INSERT INTO drying_sessions (user_id, set_temp, set_humidity, status, start_time, schedule_id, notes)
+                VALUES (:uid, :temp, :hum, 'Running', NOW(), :sched_id, :notes)
+            ");
+            $sessionStmt->execute([
+                ':uid' => $pendingSchedule['user_id'],
+                ':temp' => $pendingSchedule['set_temp'],
+                ':hum' => $pendingSchedule['set_humidity'],
+                ':sched_id' => $pendingSchedule['id'],
+                ':notes' => 'Auto-started from schedule: ' . $pendingSchedule['title']
+            ]);
+            $newSessionId = $dbh->lastInsertId();
+            
+            // 2. Update drying_controls with target parameters
+            $dbh->prepare("
+                UPDATE drying_controls 
+                SET target_temp = :temp, target_humidity = :hum, 
+                    status = 'RUNNING', start_time = NOW(), cooldown_until = NULL
+                WHERE id = 1
+            ")->execute([
+                ':temp' => $pendingSchedule['set_temp'],
+                ':hum' => $pendingSchedule['set_humidity']
+            ]);
+            
+            // 3. Mark schedule as Running
+            $dbh->prepare("
+                UPDATE batch_schedules 
+                SET status = 'Running', last_checked = NOW(), auto_started = 1
+                WHERE id = :sid
+            ")->execute([':sid' => $pendingSchedule['id']]);
+            
+            $dbh->commit();
+            
+            // Return RUN command to Arduino
+            sendResponse('success', '✅ Auto-started scheduled session: ' . $pendingSchedule['title'], [
+                'command'      => 'RUN',
+                'heater'       => 1,
+                'heater1'      => 1,
+                'heater2'      => 1,
+                'exhaust'      => 0,
+                'fan'          => 1,
+                'fan1'         => 1,
+                'fan2'         => 1,
+                'phase'        => 'Heating',
+                'session_id'   => $newSessionId,
+                'target_temp'  => floatval($pendingSchedule['set_temp']),
+                'target_hum'   => floatval($pendingSchedule['set_humidity']),
+                'duration_hours' => floatval($pendingSchedule['duration_hours']),
+                'auto_started' => true,
+                'schedule_title' => $pendingSchedule['title']
+            ]);
+        }
+    } catch (Exception $e) {
+        // Schedule check failed - continue with idle response
+        error_log("Schedule auto-start error: " . $e->getMessage());
+    }
+    
+    // No active session and no pending schedule
     sendResponse('success', '✅ Device online (heartbeat received) - No active session. Standby.', [
         'command'      => 'STOP',
         'heater'       => 0,
@@ -106,14 +234,19 @@ $cooldown_until   = $ctrlRow['cooldown_until'] ?? null;
 
 // ── 4. Check if we are in COOLDOWN phase ─────────────────────
 $now_ts = time();
-$in_cooldown = false;
 
-if ($ctrl_status === 'COOLDOWN' && $cooldown_until) {
-    $cooldown_ts = strtotime($cooldown_until);
-    if ($now_ts < $cooldown_ts) {
-        // Still cooling down — all relays OFF, tell ESP to COOLDOWN
-        $remaining = $cooldown_ts - $now_ts;
+if ($ctrl_status === 'COOLDOWN') {
+    $cooldown_remaining = 0;
+    if ($cooldown_until) {
+        $cooldown_ts = strtotime($cooldown_until);
+        if ($cooldown_ts !== false) {
+            $cooldown_remaining = max(0, $cooldown_ts - $now_ts);
+        }
+    }
 
+    // While still inside the minimum cooldown window OR temperature is still above target,
+    // keep everything OFF and do not resume heating.
+    if ($cooldown_remaining > 0 || $temp > $target_temp) {
         // Log cooldown reading
         try {
             $dbh->prepare(
@@ -123,28 +256,39 @@ if ($ctrl_status === 'COOLDOWN' && $cooldown_until) {
             )->execute([':sid' => $sid, ':temp' => $temp, ':hum' => $humidity]);
         } catch (Exception $e) {}
 
-    sendResponse('success', '✅ Device online (heartbeat received) - Cooldown phase.', [
-            'command'          => 'COOLDOWN',
-            'heater'           => 0,
-            'exhaust'          => 0,
-            'fan'              => 0,
-            'phase'            => 'Cooldown',
-            'session_id'       => $sid,
-            'target_temp'      => $target_temp,
-            'target_hum'       => $target_hum,
-            'cooldown_remaining' => $remaining,
-            'auto_stopped'     => false,
-            'fish_ready'       => false,
-            'alert'            => null,
+        sendResponse('success', '✅ Device online (heartbeat received) - Cooldown phase.', [
+            'command'            => 'COOLDOWN',
+            'heater'             => 0,
+            'exhaust'            => 0,
+            'fan'                => 0,
+
+            // Dual device controls - ALL OFF during cooldown
+            'heater1'            => 0,
+            'heater2'            => 0,
+            'fan1'               => 0,
+            'fan2'               => 0,
+
+            'phase'              => 'Cooldown',
+            'session_id'         => $sid,
+            'target_temp'        => $target_temp,
+            'target_hum'         => $target_hum,
+            'cooldown_remaining' => $cooldown_remaining,
+            'auto_stopped'       => false,
+            'fish_ready'         => false,
+            'alert'              => null,
         ]);
-    } else {
-        // Cooldown finished → restart heating (set status back to RUNNING)
+    }
+
+    // Cooldown time has finished AND temperature has dropped back to/below the set point
+    // → allow normal control to resume.
+    try {
         $dbh->prepare(
             "UPDATE drying_controls SET status='RUNNING', cooldown_until=NULL WHERE id=1"
         )->execute();
-        $ctrl_status = 'RUNNING';
-        // Fall through to normal control logic below — fan will turn back ON
+    } catch (Exception $e) {
+        // Non-fatal — device will still follow temperature thresholds below
     }
+    $ctrl_status = 'RUNNING';
 }
 
 // ── 5. Normal control thresholds ─────────────────────────────
@@ -267,7 +411,7 @@ if (!$auto_stopped) {
 
 // ── 8. Simple cycling behavior: target temp reached → cooldown ─
 // Only check when NOT already in cooldown or auto-stopped
-if (!$auto_stopped) {
+if (!$auto_stopped && $ctrl_status !== 'COOLDOWN') {
     // Simple trigger: when temperature reaches or exceeds target
     if ($temp >= $target_temp) {
         // ── Target reached → enter 5-minute COOLDOWN ──────────

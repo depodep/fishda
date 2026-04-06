@@ -5,30 +5,31 @@
 #include <DHT.h>
 #include <ArduinoJson.h>
 
- #define DHTPIN      D4
+#define DHTPIN      D4
 #define DHTTYPE     DHT11
 
 #define FAN1_PIN    D6  
 #define FAN2_PIN    D7
 
- const char* ssid     = "Redmi Note 13";
+const char* ssid     = "Redmi Note 13";
 const char* password = "aaaaaaaa";
 
- const String espAccessCode = "APS-ESP-2026";
+const String espAccessCode = "APS-ESP-2026";
 const String modelUnit = "Fishda";
 const String modelUnitCode  = "FD2026";
 const String deviceUniqueCode = "ESP8266-UNIT-001";
 
- const char* serverIP = "10.18.239.71";
+const char* serverIP = "10.18.239.71";
 const String baseURL = String("http://") + serverIP + "/fishda";
 String logReadingURL = baseURL + "/api/session_api.php";
 
- unsigned long lastSendTime = 0;
+unsigned long lastSendTime = 0;
 const unsigned long SEND_INTERVAL = 3000; 
 
 unsigned long lastSuccessfulServerContact = 0;
 const unsigned long FAILSAFE_TIMEOUT = 20000;
 
+int commErrorCount = 0;
 
 DHT dht(DHTPIN, DHTTYPE);
 WiFiClient wifiClient;
@@ -61,8 +62,9 @@ void setup() {
   Serial.begin(115200);
   delay(100);
 
-  pinMode(FAN1_PIN, OUTPUT);    digitalWrite(FAN1_PIN, LOW);
-  pinMode(FAN2_PIN, OUTPUT);    digitalWrite(FAN2_PIN, LOW);
+  // Initialize relays to OFF state (HIGH for ACTIVE LOW relay modules)
+  pinMode(FAN1_PIN, OUTPUT);    digitalWrite(FAN1_PIN, HIGH);
+  pinMode(FAN2_PIN, OUTPUT);    digitalWrite(FAN2_PIN, HIGH);
 
   dht.begin();
 
@@ -155,7 +157,7 @@ bool readSensorData(float &temperature, float &humidity) {
 
 void sendSensorData(float temperature, float humidity) {
   HTTPClient http;
-  
+  bool anyError = false;
 
   Serial.println("📤 PRIORITY: Updating sensor cache...");
   http.begin(wifiClient, baseURL + "/api/sensor_api.php");
@@ -169,10 +171,11 @@ void sendSensorData(float temperature, float humidity) {
   
   if (httpCode == HTTP_CODE_OK) {
     Serial.println("✅ Sensor cache updated - DEVICE ONLINE (heartbeat)");
-    lastSuccessfulServerContact = millis(); 
+    lastSuccessfulServerContact = millis();
   } else {
     Serial.print("⚠️ Cache update failed: ");
     Serial.println(httpCode);
+    anyError = true;
   }
   http.end();
   
@@ -203,37 +206,50 @@ void sendSensorData(float temperature, float humidity) {
 
     if (!err && doc["status"] == "success") {
       JsonVariant data = doc["data"];
-      String status = data["status"] | "Idle";
-      String command = data["command"] | "RUN";
-
-      if (status == "Running" || status == "RUNNING") {
-        int sessionId = data["session_id"] | 0;
-        if (sessionId > 0) {
-          logSensorData(temperature, humidity, sessionId);
-        }
-      } else if (command == "COOLDOWN") {
-        // ── COOLDOWN MODE: Keep fans OFF for 5 minutes ──
-        Serial.println("❄️ COOLDOWN COMMAND - Fans OFF");
+      
+      // Check if data is empty array (no active sessions found)
+      if (data.isNull() || (data.is<JsonArray>() && data.size() == 0)) {
+        Serial.println("⏸ No active session found - keeping data flow, relays OFF");
         allRelaysOff();
-        // Still log data during cooldown
-        int sessionId = data["session_id"] | 0;
-        if (sessionId > 0) {
-          logSensorData(temperature, humidity, sessionId);
-        }
-      } else {
-        // ── NO ACTIVE SESSION: Keep fans OFF BUT STILL LOG DATA for live display ──
-        Serial.println("⏸ No active session - keeping data flow, relays OFF");
-        allRelaysOff();
-        // Log as session_id=0 for idle state (used for live display)
         logSensorData(temperature, humidity, 0);
+      } else {
+        // Session data exists - extract fields
+        String status = data["status"] | "Idle";
+        String command = data["command"] | "RUN";
+        int sessionId = data["session_id"] | 0;
+
+        // Check if session is active: either status is Running OR command suggests activity
+        if ((status == "Running" || status == "RUNNING") || (command == "RUN" && sessionId > 0)) {
+          Serial.println("✅ Active session detected - logging data");
+          if (sessionId > 0) {
+            logSensorData(temperature, humidity, sessionId);
+          }
+        } else if (command == "COOLDOWN") {
+          // ── COOLDOWN MODE: Keep fans OFF for 5 minutes ──
+          Serial.println("❄️ COOLDOWN COMMAND - Fans OFF");
+          allRelaysOff();
+          // Still log data during cooldown
+          if (sessionId > 0) {
+            logSensorData(temperature, humidity, sessionId);
+          }
+        } else {
+          // ── NO ACTIVE SESSION: Keep fans OFF BUT STILL LOG DATA for live display ──
+          Serial.println("⏸ Session inactive - keeping data flow, relays OFF");
+          allRelaysOff();
+          // Log as session_id=0 for idle state (used for live display)
+          logSensorData(temperature, humidity, 0);
+        }
       }
     } else {
       Serial.println("❌ Invalid JSON response or error status");
+      // Fallback: keep logging idle data
+      allRelaysOff();
+      logSensorData(temperature, humidity, 0);
     }
   } else {
     Serial.print("❌ Session check failed: ");
     Serial.println(httpCode);
-    
+    anyError = true;
 
     if (httpCode == HTTPC_ERROR_CONNECTION_REFUSED) {
       Serial.println("   → Connection refused. Check server IP and port.");
@@ -245,6 +261,23 @@ void sendSensorData(float temperature, float humidity) {
   }
 
   http.end();
+
+  // ── Communication failsafe: 10 consecutive errors → turn everything OFF ──
+  if (anyError) {
+    commErrorCount++;
+    Serial.print("⚠️ Comm error count: ");
+    Serial.println(commErrorCount);
+    if (commErrorCount >= 10) {
+      Serial.println("🚨 FAILSAFE: 10 consecutive errors, turning all relays OFF");
+      allRelaysOff();
+    }
+  } else {
+    // Reset error counter on any successful full cycle
+    if (commErrorCount > 0) {
+      Serial.println("✅ Communication restored, resetting error counter");
+    }
+    commErrorCount = 0;
+  }
 }
 
 
@@ -310,12 +343,14 @@ void logSensorData(float temperature, float humidity, int sessionId) {
 
 
 void controlRelays(int fan1, int fan2) {
-  digitalWrite(FAN1_PIN, fan1 ? HIGH : LOW);
-  digitalWrite(FAN2_PIN, fan2 ? HIGH : LOW);
+  // ACTIVE LOW relay: 1=ON (LOW), 0=OFF (HIGH)
+  digitalWrite(FAN1_PIN, fan1 ? LOW : HIGH);
+  digitalWrite(FAN2_PIN, fan2 ? LOW : HIGH);
 }
 
 
 void allRelaysOff() {
-  digitalWrite(FAN1_PIN, LOW);
-  digitalWrite(FAN2_PIN, LOW);
+  // ACTIVE LOW relay: HIGH = OFF
+  digitalWrite(FAN1_PIN, HIGH);
+  digitalWrite(FAN2_PIN, HIGH);
 }

@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Test Fixes - Stop & Sensor Data</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .test { border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 5px; }
+    .test h3 { margin-top: 0; color: #333; }
+    button { padding: 10px 20px; font-size: 14px; cursor: pointer; margin: 5px; }
+    .success { color: green; }
+    .error { color: red; }
+    .pending { color: orange; }
+    pre { background: #f5f5f5; padding: 10px; border-radius: 3px; overflow-x: auto; }
+  </style>
+</head>
+<body>
+  <h1>Test Suite: Stop Button & Sensor Data Fixes</h1>
+  
+  <div class="test">
+    <h3>1. Test Stop Button Error Handling</h3>
+    <p>This tests the improved JSON parsing and error handling in stopSession().</p>
+    <button onclick="testStopAPI()">Test Stop API Call</button>
+    <pre id="stop-result"></pre>
+  </div>
+  
+  <div class="test">
+    <h3>2. Test Get Live Data with Fallback</h3>
+    <p>This tests the fallback from drying_logs to sensor_readings.</p>
+    <button onclick="testGetLiveData()">Test Get Live Data</button>
+    <pre id="live-data-result"></pre>
+  </div>
+  
+  <div class="test">
+    <h3>3. Check Database Records</h3>
+    <p>Shows counts of records in key tables.</p>
+    <button onclick="checkDatabaseState()">Check Database</button>
+    <pre id="db-state-result"></pre>
+  </div>
+
+  <script>
+    function setResult(elementId, text, type = 'pending') {
+      const el = document.getElementById(elementId);
+      el.textContent = text;
+      el.className = type;
+    }
+
+    async function testStopAPI() {
+      setResult('stop-result', 'Testing emergency_stop endpoint...', 'pending');
+      try {
+        const fd = new FormData();
+        fd.append('action', 'emergency_stop');
+        
+        const response = await fetch('api/controls_api.php', { method: 'POST', body: fd });
+        
+        // Test: Check response.ok
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        // Test: Safe JSON parsing
+        const responseText = await response.text();
+        console.log('Raw response:', responseText);
+        
+        let j;
+        try {
+          j = JSON.parse(responseText);
+        } catch (parseError) {
+          throw new Error('Invalid JSON: ' + responseText.substring(0, 100));
+        }
+        
+        const result = `✅ SUCCESS\nStatus: ${j.status}\nMessage: ${j.message}\nResponse:\n${JSON.stringify(j, null, 2)}`;
+        setResult('stop-result', result, j.status === 'success' ? 'success' : 'error');
+      } catch (e) {
+        setResult('stop-result', `❌ ERROR\n${e.message}`, 'error');
+      }
+    }
+
+    async function testGetLiveData() {
+      setResult('live-data-result', 'Testing get_live_data endpoint...', 'pending');
+      try {
+        const response = await fetch('api/session_api.php?action=get_live_data&proto_id=1');
+        const j = await response.json();
+        
+        if (j.status !== 'success') {
+          throw new Error(j.message || 'Unknown error');
+        }
+        
+        const logs = j.data.recent_logs || [];
+        const result = `✅ SUCCESS\nRecent logs count: ${logs.length}\nLatest data:\n${JSON.stringify(logs, null, 2)}`;
+        setResult('live-data-result', result, 'success');
+      } catch (e) {
+        setResult('live-data-result', `❌ ERROR\n${e.message}`, 'error');
+      }
+    }
+
+    async function checkDatabaseState() {
+      setResult('db-state-result', 'Checking database...', 'pending');
+      try {
+        const response = await fetch('quick_sensor_check.php');
+        const html = await response.text();
+        
+        // Extract key info
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = html;
+        const pElements = tempDiv.querySelectorAll('p');
+        
+        let info = '📊 DATABASE STATE\n\n';
+        pElements.forEach(p => {
+          const text = p.textContent.trim();
+          if (text.includes('records') || text.includes('Running') || text.includes('latest')) {
+            info += text + '\n';
+          }
+        });
+        
+        setResult('db-state-result', info, 'success');
+      } catch (e) {
+        setResult('db-state-result', `❌ ERROR\n${e.message}`, 'error');
+      }
+    }
+
+    console.log('Test suite loaded. Use buttons to run tests.');
+  </script>
+</body>
+</html>

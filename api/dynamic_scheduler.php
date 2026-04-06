@@ -10,28 +10,34 @@ function validateScheduledSessions($dbh) {
         $now = date('Y-m-d H:i:s');
         
         // 1. CHECK FOR SCHEDULES THAT SHOULD START NOW
+        // Note: Using first active prototype since this is a single-device system
         $startCheck = $dbh->prepare("
             SELECT bs.id, bs.user_id, bs.title, bs.sched_date, bs.sched_time,
-                   bs.set_temp, bs.set_humidity, bs.duration_hours, u.proto_id
+                   bs.set_temp, bs.set_humidity, bs.duration_hours
             FROM batch_schedules bs
-            JOIN tblusers u ON u.id = bs.user_id
             WHERE bs.status = 'Scheduled' 
             AND CONCAT(bs.sched_date, ' ', bs.sched_time) <= :now
             AND (bs.last_checked IS NULL OR bs.last_checked < DATE_SUB(:now2, INTERVAL 1 MINUTE))
         ");
         $startCheck->execute([':now' => $now, ':now2' => $now]);
         
+        // Get the first active prototype
+        $protoStmt = $dbh->query("SELECT id FROM tbl_prototypes WHERE status = 1 ORDER BY id ASC LIMIT 1");
+        $defaultProto = $protoStmt->fetch(PDO::FETCH_ASSOC);
+        $protoId = $defaultProto ? (int)$defaultProto['id'] : 1;
+        
         foreach ($startCheck->fetchAll(PDO::FETCH_ASSOC) as $schedule) {
-            // Check if prototype is online
-            if (isPrototypeOnline($dbh, $schedule['proto_id'])) {
-                // Check if user doesn't already have a running session
+            // Check if prototype is online using live_sensor_cache timestamp
+            if (isPrototypeOnline($dbh, $protoId)) {
+                // Check if there's no running session already
                 $activeCheck = $dbh->prepare(
                     "SELECT session_id FROM drying_sessions 
-                     WHERE user_id = :uid AND status = 'Running' LIMIT 1"
+                     WHERE status = 'Running' LIMIT 1"
                 );
-                $activeCheck->execute([':uid' => $schedule['user_id']]);
+                $activeCheck->execute();
                 
                 if (!$activeCheck->fetch()) {
+                    $schedule['proto_id'] = $protoId;
                     startScheduledSession($dbh, $schedule);
                 }
             }
@@ -68,17 +74,16 @@ function isPrototypeOnline($dbh, $proto_id) {
     if (!$proto_id) return false;
     
     try {
-        $stmt = $dbh->prepare(
-            "SELECT status, TIMESTAMPDIFF(SECOND, updated_at, NOW()) AS seconds_since_seen
-             FROM tbl_prototypes WHERE id = :pid LIMIT 1"
+        // Check live_sensor_cache timestamp - more reliable than prototype updated_at
+        $stmt = $dbh->query(
+            "SELECT TIMESTAMPDIFF(SECOND, timestamp, NOW()) AS age_seconds
+             FROM live_sensor_cache WHERE id = 1 LIMIT 1"
         );
-        $stmt->execute([':pid' => $proto_id]);
-        $proto = $stmt->fetch(PDO::FETCH_ASSOC);
+        $cache = $stmt->fetch(PDO::FETCH_ASSOC);
         
-        if ($proto) {
-            $isActive = ((string)$proto['status'] === '1');
-            $secondsSince = intval($proto['seconds_since_seen'] ?? 999999);
-            return $isActive && $secondsSince <= 30;
+        if ($cache) {
+            $age = (int)($cache['age_seconds'] ?? 999999);
+            return $age >= 0 && $age < 30;
         }
         
         return false;

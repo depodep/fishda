@@ -1,0 +1,61 @@
+# Fishda Production Security - Block access to debug/test files
+# Place this in .htaccess to prevent access to sensitive files
+
+<Files "*.log">
+    Deny from all
+</Files>
+
+<Files "debug_*.php">
+    Deny from all
+</Files>
+
+<Files "test_*.php">
+    Deny from all
+</Files>
+
+<Files "cleanup_*.php">
+    Deny from all
+</Files>
+
+<Files "setup_*.php">
+    Deny from all
+</Files>
+
+<Files "fix_*.php">
+    Deny from all
+</Files>
+
+<Files "*.sql">
+    Deny from all
+</Files>
+
+# Allow specific maintenance files only for admin IP
+# Uncomment and set your admin IP address
+# <Files "emergency_stop.php">
+#     Order Deny,Allow
+#     Deny from all
+#     Allow from 192.168.1.100
+# </Files>
+
+# Block access to sensitive directories
+<Directory "database/">
+    Deny from all
+</Directory>
+
+<Directory ".git/">
+    Deny from all
+</Directory>
+
+<Directory ".vscode/">
+    Deny from all
+</Directory>
+
+# Prevent directory browsing
+Options -Indexes
+
+# Security headers
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options nosniff
+    Header always set X-Frame-Options DENY
+    Header always set X-XSS-Protection "1; mode=block"
+</IfModule>

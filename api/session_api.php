@@ -98,16 +98,8 @@ function resolveSessionUserIdFromPrototype($dbh, $proto_id) {
         return $session_user_id;
     }
 
-    if ($proto_id > 0) {
-        $chk = $dbh->prepare("SELECT id FROM tblusers WHERE proto_id=:proto_id AND status=1 LIMIT 1");
-        $chk->execute([':proto_id' => $proto_id]);
-        $row = $chk->fetch(PDO::FETCH_ASSOC);
-        if ($row) {
-            $_SESSION['user_id'] = (int)$row['id'];
-            return (int)$row['id'];
-        }
-    }
-
+    // When no session user, use system operator or first active user
+    // proto_id is for device identification, not user lookup
     $row = $dbh->query("SELECT id FROM tblusers WHERE username='system_operator' AND status=1 LIMIT 1")
               ->fetch(PDO::FETCH_ASSOC);
     if (!$row) {
@@ -147,9 +139,12 @@ switch ($action) {
     case 'start_session':
         $set_temp = max(30, min(70, floatval($_POST['set_temp'] ?? 45)));
         $set_hum  = max(10, min(80, floatval($_POST['set_humidity'] ?? 25)));
+        $schedule_id = intval($_POST['schedule_id'] ?? 0) ?: null; // Track if session is from a schedule
 
-        // Get a default user_id for the session (use system operator or first user)
-        $uid_row = $dbh->query("SELECT id FROM tblusers WHERE username='system_operator' AND status=1 LIMIT 1")
+        // Get Fishda Bot user_id for automated sessions
+        $uid_row = $dbh->query("SELECT id FROM tblusers WHERE username='fishda_bot' AND status=1 LIMIT 1")
+                       ->fetch(PDO::FETCH_ASSOC)
+                    ?: $dbh->query("SELECT id FROM tblusers WHERE permission='admin' AND status=1 ORDER BY id ASC LIMIT 1")
                        ->fetch(PDO::FETCH_ASSOC)
                     ?: $dbh->query("SELECT id FROM tblusers WHERE status=1 ORDER BY id ASC LIMIT 1")
                        ->fetch(PDO::FETCH_ASSOC);
@@ -183,8 +178,13 @@ switch ($action) {
 
         try {
             $dbh->prepare("UPDATE drying_sessions SET status='Interrupted', end_time=NOW() WHERE status='Running'")->execute([]);
-            $stmt = $dbh->prepare("INSERT INTO drying_sessions (user_id,set_temp,set_humidity,status,start_time) VALUES(:uid,:t,:h,'Running',NOW())");
-            $stmt->execute([':uid'=>$default_user_id,':t'=>$set_temp,':h'=>$set_hum]);
+            
+            // Get prototype ID for the session
+            $proto_row = $dbh->query("SELECT id FROM tbl_prototypes WHERE status = 1 LIMIT 1")->fetch();
+            $proto_id = $proto_row ? $proto_row['id'] : 1;
+            
+            $stmt = $dbh->prepare("INSERT INTO drying_sessions (user_id,proto_id,schedule_id,set_temp,set_humidity,status,start_time) VALUES(:uid,:pid,:sid,:t,:h,'Running',NOW())");
+            $stmt->execute([':uid'=>$default_user_id,':pid'=>$proto_id,':sid'=>$schedule_id,':t'=>$set_temp,':h'=>$set_hum]);
             $session_id = $dbh->lastInsertId();
             // Sync drying_controls — clear any leftover cooldown
             $dbh->prepare("UPDATE drying_controls SET target_temp=:t,target_humidity=:h,status='RUNNING',start_time=NOW(),cooldown_until=NULL WHERE id=1")
@@ -251,7 +251,7 @@ switch ($action) {
     // ============================================================
     case 'log_reading':
         // Validate scheduled sessions before processing log
-        validateScheduledSessions($dbh);
+        // validateScheduledSessions($dbh); // Disabled: schedule now handled in sensor_api.php
 
         $session_id        = intval($_POST['session_id'] ?? 0);
         $recorded_temp     = floatval($_POST['temp'] ?? 0);
@@ -284,6 +284,30 @@ switch ($action) {
         $target_temp = floatval($session['set_temp']);
         $target_hum  = floatval($session['set_humidity']);
 
+        // Read global cooldown state maintained by sensor_api.php
+        $ctrl_status        = 'RUNNING';
+        $cooldown_until     = null;
+        $cooldown_remaining = 0;
+        try {
+            $ctrl = $dbh->query("SELECT status, cooldown_until FROM drying_controls WHERE id=1")
+                        ->fetch(PDO::FETCH_ASSOC);
+            if ($ctrl) {
+                $ctrl_status    = $ctrl['status']         ?? 'RUNNING';
+                $cooldown_until = $ctrl['cooldown_until'] ?? null;
+                if ($cooldown_until) {
+                    $cd_ts = strtotime($cooldown_until);
+                    if ($cd_ts !== false) {
+                        $cooldown_remaining = max(0, $cd_ts - time());
+                    }
+                }
+            }
+        } catch (Exception $e) {
+            // If controls row is missing, fall back to normal behaviour
+            $ctrl_status        = 'RUNNING';
+            $cooldown_until     = null;
+            $cooldown_remaining = 0;
+        }
+
         $OVERHEAT_THRESHOLD  = $target_temp + 2;
         $CRITICAL_THRESHOLD  = $target_temp + 8;
         $AUTOSTOP_THRESHOLD  = $target_temp + 15;
@@ -296,24 +320,87 @@ switch ($action) {
         $alert         = null;
         $auto_stopped  = false;
         $fish_ready    = false;
+        $command       = 'RUN';
 
-        if ($recorded_temp >= $AUTOSTOP_THRESHOLD) {
-            $dbh->prepare("UPDATE drying_sessions SET status='Interrupted',end_time=NOW() WHERE session_id=:sid")->execute([':sid'=>$session_id]);
-            $dbh->query("UPDATE drying_controls SET status='STOPPED',start_time=NULL,cooldown_until=NULL WHERE id=1");
-            $phase = 'Cooldown'; $fan1_state = 0; $fan2_state = 0; $auto_stopped = true;
-            $alert = ['level'=>'emergency','title'=>'🚨 EMERGENCY AUTO-STOP','message'=>"Temp {$recorded_temp}°C — System auto-stopped!",'temp'=>$recorded_temp,'target'=>$target_temp];
-        } elseif ($recorded_temp >= $CRITICAL_THRESHOLD) {
-            $phase = 'Cooldown'; $fan1_state = 0; $fan2_state = 0;
-            $alert = ['level'=>'critical','title'=>'⚠️ CRITICAL OVERHEAT','message'=>"Temp {$recorded_temp}°C critical!",'temp'=>$recorded_temp,'target'=>$target_temp];
-        } elseif ($recorded_temp >= $OVERHEAT_THRESHOLD) {
-            $phase = 'Cooldown'; $fan1_state = 0; $fan2_state = 0;
-            $alert = ['level'=>'warning','title'=>'🌡️ Overheating','message'=>"Temp {$recorded_temp}°C exceeds target {$target_temp}°C.",'temp'=>$recorded_temp,'target'=>$target_temp];
-        } elseif ($recorded_temp <= $UNDERHEAT_THRESHOLD) {
-            // Fans ON to heat up
-            $fan1_state = 1; $fan2_state = 1; $phase = 'Heating';
-        } else {
-            // At target range — fans still ON for circulation/drying
-            $fan1_state = 1; $fan2_state = 1; $phase = 'Drying';
+        $skipNormalLogic = false;
+
+        // Enforce 5-minute cooldown and temperature-based resume
+        if ($ctrl_status === 'COOLDOWN') {
+            // While within the minimum cooldown window OR temperature is still above target,
+            // keep everything OFF and do not resume the session.
+            if ($cooldown_remaining > 0 || $recorded_temp > $target_temp) {
+                $phase          = 'Cooldown';
+                $fan1_state     = 0;
+                $fan2_state     = 0;
+                $command        = 'COOLDOWN';
+                $skipNormalLogic = true;
+            } else {
+                // Cooldown finished AND temperature has dropped back to/below the set point
+                // → allow normal control to resume.
+                try {
+                    $dbh->prepare("UPDATE drying_controls SET status='RUNNING', cooldown_until=NULL WHERE id=1")
+                        ->execute();
+                } catch (Exception $e) {
+                    // Non-fatal — device will still follow temperature logic below
+                }
+                $ctrl_status        = 'RUNNING';
+                $cooldown_until     = null;
+                $cooldown_remaining = 0;
+            }
+        }
+
+        if (!$skipNormalLogic) {
+            if ($recorded_temp >= $AUTOSTOP_THRESHOLD) {
+                $dbh->prepare("UPDATE drying_sessions SET status='Interrupted',end_time=NOW() WHERE session_id=:sid")
+                    ->execute([':sid'=>$session_id]);
+                $dbh->query("UPDATE drying_controls SET status='STOPPED',start_time=NULL,cooldown_until=NULL WHERE id=1");
+                $phase        = 'Cooldown';
+                $fan1_state   = 0;
+                $fan2_state   = 0;
+                $auto_stopped = true;
+                $command      = 'STOP';
+                $alert = [
+                    'level'  => 'emergency',
+                    'title'  => '🚨 EMERGENCY AUTO-STOP',
+                    'message'=> "Temp {$recorded_temp}°C — System auto-stopped!",
+                    'temp'   => $recorded_temp,
+                    'target' => $target_temp,
+                ];
+            } elseif ($recorded_temp >= $CRITICAL_THRESHOLD) {
+                $phase      = 'Cooldown';
+                $fan1_state = 0;
+                $fan2_state = 0;
+                $command    = 'COOLDOWN';
+                $alert = [
+                    'level'  => 'critical',
+                    'title'  => '⚠️ CRITICAL OVERHEAT',
+                    'message'=> "Temp {$recorded_temp}°C critical!",
+                    'temp'   => $recorded_temp,
+                    'target' => $target_temp,
+                ];
+            } elseif ($recorded_temp >= $OVERHEAT_THRESHOLD) {
+                $phase      = 'Cooldown';
+                $fan1_state = 0;
+                $fan2_state = 0;
+                $command    = 'COOLDOWN';
+                $alert = [
+                    'level'  => 'warning',
+                    'title'  => '🌡️ Overheating',
+                    'message'=> "Temp {$recorded_temp}°C exceeds target {$target_temp}°C.",
+                    'temp'   => $recorded_temp,
+                    'target' => $target_temp,
+                ];
+            } elseif ($recorded_temp <= $UNDERHEAT_THRESHOLD) {
+                // Fans ON to heat up
+                $fan1_state = 1;
+                $fan2_state = 1;
+                $phase      = 'Heating';
+            } else {
+                // At target range — fans still ON for circulation/drying
+                $fan1_state = 1;
+                $fan2_state = 1;
+                $phase      = 'Drying';
+            }
         }
 
         if (!$auto_stopped) {
@@ -349,14 +436,16 @@ switch ($action) {
         }
 
         sendResponse('success', 'Prototype log recorded.', [
-            'phase'        => $phase,
-            'fan1'         => $fan1_state,
-            'fan2'         => $fan2_state,
-            'temp'         => $recorded_temp,
-            'humidity'     => $recorded_humidity,
-            'auto_stopped' => $auto_stopped,
-            'fish_ready'   => $fish_ready,
-            'alert'        => $alert,
+            'phase'               => $phase,
+            'fan1'                => $fan1_state,
+            'fan2'                => $fan2_state,
+            'temp'                => $recorded_temp,
+            'humidity'            => $recorded_humidity,
+            'auto_stopped'        => $auto_stopped,
+            'fish_ready'          => $fish_ready,
+            'alert'               => $alert,
+            'command'             => $command,
+            'cooldown_remaining'  => $cooldown_remaining,
         ]);
         break;
 
@@ -370,14 +459,9 @@ switch ($action) {
                 $stmt = $dbh->prepare("SELECT session_id, status, set_temp, set_humidity FROM drying_sessions WHERE session_id=:sid LIMIT 1");
                 $stmt->execute([':sid'=>$session_id]);
             } else {
-                if ($is_admin) {
-                    $stmt = $dbh->query("SELECT session_id,status,set_temp,set_humidity FROM drying_sessions WHERE status='Running' ORDER BY start_time DESC LIMIT 1");
-                } elseif ($user_id > 0) {
-                    $stmt = $dbh->prepare("SELECT session_id,status,set_temp,set_humidity FROM drying_sessions WHERE user_id=:uid AND status='Running' ORDER BY start_time DESC LIMIT 1");
-                    $stmt->execute([':uid'=>$user_id]);
-                } else {
-                    $stmt = $dbh->query("SELECT session_id,status,set_temp,set_humidity FROM drying_sessions WHERE status='Running' ORDER BY start_time DESC LIMIT 1");
-                }
+                // For ESP requests (validated by validateEspRequest), always return ANY running session
+                // This matches the behavior of get_live_data used by the web UI
+                $stmt = $dbh->query("SELECT session_id,status,set_temp,set_humidity FROM drying_sessions WHERE status='Running' ORDER BY start_time DESC LIMIT 1");
             }
             $data = $stmt->fetch(PDO::FETCH_ASSOC);
             sendResponse('success', 'Status fetched.', $data ?: []);
@@ -404,32 +488,95 @@ switch ($action) {
                 $session = getCurrentSessionStatus($dbh, $user_id);
             }
 
-            // If no active session, get latest sensor reading from drying_logs (for idle display)
+            // Always check device last-seen to detect OFFLINE state
+            $liveHeartbeat = $dbh->query(
+                "SELECT TIMESTAMPDIFF(SECOND, timestamp, NOW()) AS age_seconds
+                 FROM live_sensor_cache WHERE id = 1 LIMIT 1"
+            )->fetch(PDO::FETCH_ASSOC);
+            $ageSeconds   = $liveHeartbeat ? (int)($liveHeartbeat['age_seconds'] ?? 999999) : 999999;
+            $deviceOnline = ($ageSeconds >= 0 && $ageSeconds < 30);
+
+            // If there is a running session but device is OFFLINE → auto-stop session
+            if ($session && !$deviceOnline) {
+                $autoStopSid = (int)$session['session_id'];
+                try {
+                    $dbh->beginTransaction();
+
+                    // Mark drying session as Interrupted
+                    $dbh->prepare(
+                        "UPDATE drying_sessions
+                         SET status='Interrupted', end_time=NOW(), notes=CONCAT(COALESCE(notes,''),' [AUTO-STOP: device offline]')
+                         WHERE session_id=:sid AND status='Running'"
+                    )->execute([':sid' => $autoStopSid]);
+
+                    // Reset controls to IDLE
+                    $dbh->prepare(
+                        "UPDATE drying_controls SET status='IDLE', cooldown_until=NULL WHERE id=1"
+                    )->execute();
+
+                    $dbh->commit();
+                } catch (Exception $e) {
+                    $dbh->rollBack();
+                }
+
+                sendResponse('success', 'Session auto-stopped: device offline.', [
+                    'recorded_temp'      => null,
+                    'recorded_humidity'  => null,
+                    'phase'              => 'Idle',
+                    'heater_state'       => 0,
+                    'fan_state'          => 0,
+                    'exhaust_state'      => 0,
+                    'session_id'         => null,
+                    'set_temp'           => null,
+                    'set_humidity'       => null,
+                    'start_time'         => null,
+                    'ctrl_status'        => 'IDLE',
+                    'cooldown_remaining' => 0,
+                    'device_online'      => false,
+                    'offline_reason'     => 'device_offline_timeout',
+                ]);
+            }
+
+            // If no active session, get FRESH sensor reading from live_sensor_cache (not old logs)
             if (!$session) {
-                $latestLog = $dbh->query(
-                    "SELECT recorded_temp, recorded_humidity, phase, heater_state, exhaust_state, fan_state, timestamp
-                     FROM drying_logs
-                     ORDER BY timestamp DESC LIMIT 1"
+                // Use database time for comparison to avoid timezone issues
+                $liveCache = $dbh->query(
+                    "SELECT temperature, humidity, phase, heater1_state, heater2_state, fan1_state, fan2_state, exhaust_state, timestamp,
+                            TIMESTAMPDIFF(SECOND, timestamp, NOW()) AS age_seconds
+                     FROM live_sensor_cache
+                     WHERE id = 1
+                     LIMIT 1"
                 )->fetch(PDO::FETCH_ASSOC);
 
-                if ($latestLog) {
-                    sendResponse('success', 'Idle state - showing latest sensor data.', [
-                        'recorded_temp'      => floatval($latestLog['recorded_temp']),
-                        'recorded_humidity'  => floatval($latestLog['recorded_humidity']),
-                        'phase'              => $latestLog['phase'] ?? 'Idle',
-                        'heater_state'       => (int)$latestLog['heater_state'],
-                        'fan_state'          => (int)$latestLog['fan_state'],
-                        'exhaust_state'      => (int)$latestLog['exhaust_state'],
+                // Check if data is stale (device offline if >30 seconds old)
+                $isOnline = false;
+                if ($liveCache && isset($liveCache['age_seconds'])) {
+                    $age = (int)$liveCache['age_seconds'];
+                    // Device is online if data is fresh (within 30 seconds)
+                    $isOnline = ($age >= 0 && $age < 30);
+                }
+
+                if ($liveCache && $liveCache['temperature'] !== null && $isOnline) {
+                    sendResponse('success', 'Idle state - showing live sensor data.', [
+                        'recorded_temp'      => floatval($liveCache['temperature']),
+                        'recorded_humidity'  => floatval($liveCache['humidity']),
+                        'phase'              => 'Idle',
+                        'heater_state'       => (int)$liveCache['heater1_state'],
+                        'fan_state'          => (int)$liveCache['fan1_state'],
+                        'fan1_state'         => (int)$liveCache['fan1_state'],
+                        'fan2_state'         => (int)$liveCache['fan2_state'],
+                        'exhaust_state'      => (int)$liveCache['exhaust_state'],
                         'session_id'         => null,
                         'set_temp'           => null,
                         'set_humidity'       => null,
                         'start_time'         => null,
                         'ctrl_status'        => 'IDLE',
                         'cooldown_remaining' => 0,
+                        'device_online'      => true,
                     ]);
                 } else {
-                    // No sensor data at all
-                    sendResponse('success', 'No active session - idle state (awaiting first sensor reading).', [
+                    // No sensor data OR device offline (stale data)
+                    sendResponse('success', 'Device offline or no sensor data.', [
                         'recorded_temp'      => null,
                         'recorded_humidity'  => null,
                         'phase'              => 'Idle',
@@ -442,6 +589,7 @@ switch ($action) {
                         'start_time'         => null,
                         'ctrl_status'        => 'IDLE',
                         'cooldown_remaining' => 0,
+                        'device_online'      => false,
                     ]);
                 }
             }
@@ -556,7 +704,24 @@ switch ($action) {
                  LIMIT 5"
             );
             $recentWindow->execute([':sid' => $sid]);
-            $log['recent_logs'] = array_reverse($recentWindow->fetchAll(PDO::FETCH_ASSOC));
+            $recentLogsData = $recentWindow->fetchAll(PDO::FETCH_ASSOC);
+            
+            // Fallback to sensor_readings if drying_logs is empty
+            if (empty($recentLogsData)) {
+                $recentWindow = $dbh->prepare(
+                    "SELECT temperature AS recorded_temp, humidity AS recorded_humidity, 
+                            NULL AS phase, NULL AS heater_state, NULL AS exhaust_state, 
+                            NULL AS fan_state, timestamp
+                     FROM sensor_readings
+                     WHERE session_id = :sid
+                     ORDER BY timestamp DESC
+                     LIMIT 5"
+                );
+                $recentWindow->execute([':sid' => $sid]);
+                $recentLogsData = $recentWindow->fetchAll(PDO::FETCH_ASSOC);
+            }
+            
+            $log['recent_logs'] = array_reverse($recentLogsData);
 
             sendResponse('success', 'Live data fetched.', $log);
 
@@ -652,18 +817,52 @@ switch ($action) {
     // ============================================================
     case 'get_my_sessions':
         try {
+            // Get sessions with prototype-based access control
+            // Admin: sees all sessions | Unit users: only their prototype's sessions
+            $whereClause = '';
+            $params = [];
+            
+            if (($_SESSION['permission'] ?? 'user') === 'admin') {
+                // Admin sees ALL sessions
+                $whereClause = '';
+            } else {
+                // Unit users only see sessions from their prototype
+                $proto_id = intval($_SESSION['proto_id'] ?? $_GET['proto_id'] ?? $_POST['proto_id'] ?? 0);
+                if ($proto_id > 0) {
+                    $whereClause = 'WHERE ds.proto_id = :proto_id';
+                    $params[':proto_id'] = $proto_id;
+                } else {
+                    // If no proto_id, show no sessions
+                    $whereClause = 'WHERE 1=0';
+                }
+            }
+            
             $stmt = $dbh->prepare(
-                "SELECT ds.session_id, ds.start_time, ds.end_time, ds.set_temp, ds.set_humidity, ds.status,
+                "SELECT ds.session_id, ds.start_time, ds.end_time, ds.set_temp, ds.set_humidity, ds.status, ds.schedule_id, ds.proto_id,
                     TIMEDIFF(COALESCE(ds.end_time,NOW()),ds.start_time) AS duration,
                     ROUND(AVG(dl.recorded_temp),2)     AS avg_temp,
-                    ROUND(AVG(dl.recorded_humidity),2) AS avg_hum
+                    ROUND(AVG(dl.recorded_humidity),2) AS avg_hum,
+                    u.username, u.permission,
+                    CONCAT('FISDA - ', COALESCE(p.model_name, 'Fishda'), ' + ', COALESCE(p.given_code, 'FD2026')) AS device_info,
+                    p.model_name, p.given_code,
+                    -- Show device info for ALL sessions
+                    CONCAT('FISDA - ', COALESCE(p.model_name, 'Fishda'), ' + ', COALESCE(p.given_code, 'FD2026')) AS display_name,
+                    -- Status logic: Manual = Completed, Scheduled + Interrupted = Terminated
+                    CASE 
+                        WHEN ds.status = 'Running' THEN 'Running'
+                        WHEN ds.schedule_id IS NOT NULL AND ds.status = 'Interrupted' THEN 'Terminated'
+                        WHEN ds.status IN ('Completed', 'Interrupted') THEN 'Completed'
+                        ELSE ds.status
+                    END AS display_status
                  FROM drying_sessions ds
                  LEFT JOIN drying_logs dl ON dl.session_id=ds.session_id
-                 WHERE ds.user_id=:uid
+                 LEFT JOIN tblusers u ON u.id = ds.user_id
+                 LEFT JOIN tbl_prototypes p ON p.id = ds.proto_id
+                 $whereClause
                  GROUP BY ds.session_id
                  ORDER BY ds.start_time DESC"
             );
-            $stmt->execute([':uid'=>$user_id]);
+            $stmt->execute($params);
             sendResponse('success','Prototype sessions fetched.',$stmt->fetchAll(PDO::FETCH_ASSOC));
         } catch(Exception $e){ sendResponse('error','Failed.'); }
         break;
@@ -798,6 +997,68 @@ switch ($action) {
             );
             sendResponse('success','All records fetched.',$stmt->fetchAll(PDO::FETCH_ASSOC));
         } catch(Exception $e){ sendResponse('error',$e->getMessage()); }
+        break;
+
+    // ============================================================
+    //  GET TODAY'S SESSION STATISTICS
+    // ============================================================
+    case 'get_today_stats':
+        try {
+            $today = date('Y-m-d');
+            
+            // Get today's sessions with durations
+            $stmt = $dbh->prepare(
+                "SELECT 
+                    session_id,
+                    start_time,
+                    end_time,
+                    TIMEDIFF(COALESCE(end_time, NOW()), start_time) AS duration,
+                    TIME_TO_SEC(TIMEDIFF(COALESCE(end_time, NOW()), start_time)) AS duration_sec
+                 FROM drying_sessions 
+                 WHERE DATE(start_time) = :today AND user_id = :uid"
+            );
+            $stmt->execute([':today' => $today, ':uid' => $user_id]);
+            $todaySessions = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            
+            $totalToday = count($todaySessions);
+            $totalDurationSec = 0;
+            $shortestSec = PHP_INT_MAX;
+            $longestSec = 0;
+            
+            foreach ($todaySessions as $s) {
+                $sec = (int)$s['duration_sec'];
+                $totalDurationSec += $sec;
+                if ($sec < $shortestSec) $shortestSec = $sec;
+                if ($sec > $longestSec) $longestSec = $sec;
+            }
+            
+            // Calculate average
+            $avgDurationSec = $totalToday > 0 ? round($totalDurationSec / $totalToday) : 0;
+            
+            // Format durations as HH:MM:SS
+            $formatDuration = function($sec) {
+                if ($sec <= 0 || $sec == PHP_INT_MAX) return '—';
+                $h = floor($sec / 3600);
+                $m = floor(($sec % 3600) / 60);
+                $s = $sec % 60;
+                return sprintf('%02d:%02d:%02d', $h, $m, $s);
+            };
+            
+            // Get all-time total sessions for this user
+            $totalAll = $dbh->prepare("SELECT COUNT(*) FROM drying_sessions WHERE user_id = :uid");
+            $totalAll->execute([':uid' => $user_id]);
+            $totalAllCount = (int)$totalAll->fetchColumn();
+            
+            sendResponse('success', 'Today stats fetched.', [
+                'today_count'     => $totalToday,
+                'today_avg'       => $formatDuration($avgDurationSec),
+                'today_shortest'  => $formatDuration($shortestSec),
+                'today_longest'   => $formatDuration($longestSec),
+                'total_all'       => $totalAllCount,
+            ]);
+        } catch(Exception $e) { 
+            sendResponse('error', $e->getMessage()); 
+        }
         break;
 
     default:

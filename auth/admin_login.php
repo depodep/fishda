@@ -122,8 +122,10 @@ body{
 }
 .back{display:block;text-align:center;margin-top:14px;color:rgba(0,212,255,.72);text-decoration:none;font-size:.8rem}
 </style>
+<link rel="stylesheet" href="../assets/fishda-auth.css">
+<link rel="stylesheet" href="../assets/fishda-theme.css">
 </head>
-<body>
+<body class="fish-auth">
   <div class="card">
     <h1 class="title">Admin Login</h1>
     <p class="sub">USERNAME + PASSWORD REQUIRED</p>

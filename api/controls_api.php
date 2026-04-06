@@ -69,6 +69,18 @@ if (in_array($action, $auth_required) && !$is_admin && !$proto_id) {
 
 switch ($action) {
 
+    // ── EMERGENCY STOP: No auth required ──────────────────────
+    case 'emergency_stop':
+        try {
+            // Stop everything immediately - no auth checks
+            $dbh->query("UPDATE drying_sessions SET status='Emergency_Stop', end_time=NOW() WHERE status='Running'");
+            $dbh->query("UPDATE drying_controls SET status='STOPPED', start_time=NULL, cooldown_until=NULL WHERE id=1");
+            sendResponse('success', 'Emergency stop completed.');
+        } catch (Exception $e) {
+            sendResponse('error', 'Emergency stop failed: ' . $e->getMessage());
+        }
+        break;
+
     // ── Start drying from dashboard controls panel ────────────
     case 'set_targets':
         $t = floatval($_POST['target_temp'] ?? 50);
@@ -111,25 +123,11 @@ switch ($action) {
 
     // ── Stop drying from dashboard ────────────────────────────
     case 'stop_drying':
-        $uid = $resolved_user_id;
-        if (!$is_admin && $uid <= 0) {
-            sendResponse('error', 'No mapped account found for this prototype.');
-        }
         try {
-            if ($is_admin) {
-                // Admin stops whichever session is running
-                $res = $dbh->query(
-                    "UPDATE drying_sessions SET status='Completed', end_time=NOW() WHERE status='Running'"
-                );
-            } else {
-                $res = $dbh->prepare(
-                    "UPDATE drying_sessions SET status='Completed', end_time=NOW()
-                     WHERE user_id=:uid AND status='Running'"
-                );
-                $res->execute([':uid' => $uid]);
-            }
-            $dbh->query("UPDATE drying_controls SET status='STOPPED', start_time=NULL WHERE id=1");
-            sendResponse('success', 'Drying stopped.');
+            // Stop ANY running session (simplified for reliability)
+            $dbh->query("UPDATE drying_sessions SET status='Completed', end_time=NOW() WHERE status='Running'");
+            $dbh->query("UPDATE drying_controls SET status='STOPPED', start_time=NULL, cooldown_until=NULL WHERE id=1");
+            sendResponse('success', 'All running sessions stopped.');
         } catch (Exception $e) {
             sendResponse('error', 'Stop failed: ' . $e->getMessage());
         }
@@ -139,7 +137,7 @@ switch ($action) {
     case 'fetch_controls':
         try {
             // Validate scheduled sessions before fetching controls
-            validateScheduledSessions($dbh);
+            // validateScheduledSessions($dbh); // Disabled: schedule now handled in sensor_api.php
             
             $row = $dbh->query(
                 "SELECT status, target_temp, target_humidity FROM drying_controls WHERE id=1"

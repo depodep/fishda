@@ -1,11 +1,11 @@
 <?php
-// ============================================================
-//  DYNAMIC SESSION VALIDATOR - No task scheduler needed
-//  This function is called on every API request to maintain session state
-//  based on current time vs scheduled times in the database
-// ============================================================
+// Legacy auto-scheduler (now disabled)
+// Schedule handling is now performed inside sensor_api.php on each
+// temperature heartbeat from the device. This file is kept only
+// for reference and is no longer used in production.
 
 function validateScheduledSessions($dbh) {
+    return false; // no-op
     try {
         $now = date('Y-m-d H:i:s');
         

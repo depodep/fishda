@@ -172,7 +172,7 @@ if (isset($_GET['action'])) {
                 $colorMap = ['Scheduled'=>'#0077B6','Running'=>'#f59e0b','Done'=>'#2ec4b6','Cancelled'=>'#ef4444'];
                 foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
                     $events[] = [
-                        'id'=>'sched_'.$row['id'], 'title'=>'📅 '.$row['title'],
+                        'id'=>'sched_'.$row['id'], 'title'=>'Schedule: '.$row['title'],
                         'start'=>$row['sched_date'].'T'.$row['sched_time'],
                         'backgroundColor'=>$colorMap[$row['status']]??'#0077B6',
                         'borderColor'=>$colorMap[$row['status']]??'#0077B6', 'textColor'=>'#ffffff',
@@ -189,7 +189,7 @@ if (isset($_GET['action'])) {
                     $color = $row['status']==='Completed' ? '#2ec4b6' : '#f97316';
                     $events[] = [
                         'id'=>'sess_'.$row['session_id'],
-                        'title'=>($row['status']==='Completed'?'✅ ':'⚠️ ').$row['username'],
+                        'title'=>($row['status']==='Completed'?'Completed: ':'Alert: ').$row['username'],
                         'start'=>$row['start_time'], 'end'=>$row['end_time'],
                         'backgroundColor'=>$color, 'borderColor'=>$color, 'textColor'=>'#ffffff',
                         'extendedProps'=>['type'=>'session','session_id'=>$row['session_id'],'username'=>$row['username'],
@@ -656,8 +656,9 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 /* Warm header accent bar */
 .content-wrap>.tab-section.active{animation:fadeTabIn .22s ease;}
 @keyframes fadeTabIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}</style>
+<link rel="stylesheet" href="../assets/fishda-theme.css">
 </head>
-<body>
+<body class="theme-fishda theme-dashboard">
 <div id="toastZone"></div>
 
 <!-- ═══════════ SIDEBAR ═══════════ -->
@@ -723,7 +724,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
     <span style="font-size:11px;color:var(--text-muted)">–</span>
     <input type="date" class="filter-date" id="fDateTo" onchange="applyFilters()" title="Date to">
     <input type="text" class="filter-search" id="fSearch" placeholder="Search sessions…" oninput="applyFilters()">
-    <button onclick="clearFilters()" style="background:none;border:none;font-size:11px;color:var(--text-muted);cursor:pointer;font-family:'Mulish',sans-serif;white-space:nowrap;">✕ Clear</button>
+    <button onclick="clearFilters()" style="background:none;border:none;font-size:11px;color:var(--text-muted);cursor:pointer;font-family:'Mulish',sans-serif;white-space:nowrap;"><i class="fas fa-xmark me-1"></i>Clear</button>
     <div class="filter-live">
       <span class="live-dot"></span>System Live
     </div>
@@ -881,7 +882,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
     <div id="tab-sessions" class="tab-section">
       <div class="d-flex align-items-center justify-content-between mb-4">
         <div>
-          <div class="page-title">🐟 Drying Sessions</div>
+          <div class="page-title"><i class="fas fa-fish me-2"></i>Drying Sessions</div>
           <div class="page-sub">Complete drying session records from all prototypes.</div>
         </div>
         <div class="d-flex gap-2">
@@ -907,7 +908,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
       <div class="glass-card mt-4" id="sessDetailCard" style="display:none;">
         <div class="card-head">
           <div class="card-title" id="sessDetailTitle">Session Detail</div>
-          <button onclick="closeSessDetail()" style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:5px 12px;font-size:10px;font-weight:600;color:var(--text-muted);cursor:pointer;">✕ Close</button>
+          <button onclick="closeSessDetail()" style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:5px 12px;font-size:10px;font-weight:600;color:var(--text-muted);cursor:pointer;"><i class="fas fa-xmark me-1"></i>Close</button>
         </div>
         <div class="chart-wrap"><canvas id="sessDetailChart" height="140"></canvas></div>
       </div>
@@ -939,7 +940,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 
     <!-- ══════════════════════════ CALENDAR ══════════════════════════ -->
     <div id="tab-calendar" class="tab-section">
-      <div class="page-title mb-1">📅 Schedule Calendar</div>
+      <div class="page-title mb-1"><i class="fas fa-calendar-days me-2"></i>Schedule Calendar</div>
       <div class="page-sub mb-4">All batches, sessions, and scheduled drying plans.</div>
       <div class="row g-3">
         <div class="col-lg-8">
@@ -1042,7 +1043,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
   <div class="modal-panel">
     <div class="d-flex align-items-center justify-content-between mb-3">
       <div class="modal-title" id="evtModalTitle" style="margin-bottom:0">Event</div>
-      <button onclick="closeEventModal()" style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:5px 11px;font-size:11px;font-weight:600;color:var(--text-muted);cursor:pointer;">✕</button>
+      <button onclick="closeEventModal()" style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:5px 11px;font-size:11px;font-weight:600;color:var(--text-muted);cursor:pointer;"><i class="fas fa-xmark"></i></button>
     </div>
     <div id="evtModalBody" style="display:flex;flex-direction:column;gap:0"></div>
     <div id="evtModalActions" style="margin-top:12px"></div>
@@ -1173,7 +1174,7 @@ async function loadAlerts(){
     }
     panel.innerHTML=!data.length
       ?`<div style="text-align:center;padding:24px 10px;color:var(--text-muted);font-size:12px;">
-          <div style="font-size:28px;margin-bottom:8px;">✅</div>
+          <div style="font-size:28px;margin-bottom:8px;"><i class="fas fa-circle-check" style="color:var(--success)"></i></div>
           <div style="font-weight:700;color:var(--seafoam)">All Clear</div>
           <div style="font-size:11px;margin-top:3px;">No overheat alerts detected</div>
         </div>`

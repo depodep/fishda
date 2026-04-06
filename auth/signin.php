@@ -233,8 +233,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         .iot-row { display: none; }
     }
     </style>
+    <link rel="stylesheet" href="../assets/fishda-auth.css">
+    <link rel="stylesheet" href="../assets/fishda-theme.css">
 </head>
-<body>
+<body class="fish-auth">
 
 <div class="bg-campus"></div>
 <div class="bg-shimmer"></div>

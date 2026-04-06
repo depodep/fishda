@@ -1,14 +1,4 @@
 <?php
-// ============================================================
-//  users_dashboard.php — FINALIZED
-//  Fixes applied:
-//   1. Session guard uses $_SESSION['proto_id'] — refresh stays logged in
-//   2. session_cache_limiter prevents browser caching login redirect
-//   3. pollLiveData() handles COOLDOWN phase from server
-//   4. updatePhase() — Drying + Cooldown phases with correct icons
-//   5. updateHWChips() — Fan labeled "Fan (Heat)" as heat source
-//   6. Fan ON during Heating & Drying phases shown correctly in UI
-// ============================================================
 if (session_status() === PHP_SESSION_NONE) {
   session_cache_limiter('private_no_expire');
   session_set_cookie_params([
@@ -280,6 +270,7 @@ if (!isset($_SESSION['session_logged'])) {
   .pill-Running{background:rgba(42,157,143,.10);color:#1E7A6E;border:1px solid rgba(42,157,143,.22);}
   .pill-Completed{background:rgba(42,157,143,.10);color:#1E7A6E;border:1px solid rgba(42,157,143,.22);}
   .pill-Interrupted{background:rgba(193,68,14,.08);color:#9C3510;border:1px solid rgba(193,68,14,.2);}
+  .pill-Terminated{background:rgba(220,38,38,.08);color:#B91C1C;border:1px solid rgba(220,38,38,.25);}
   .pill-Scheduled{background:rgba(124,92,191,.08);color:#6344A0;border:1px solid rgba(124,92,191,.2);}
   .pill-Done{background:rgba(82,182,154,.10);color:#2D7A62;border:1px solid rgba(82,182,154,.22);}
 
@@ -352,8 +343,9 @@ if (!isset($_SESSION['session_logged'])) {
   .act-view{background:rgba(42,157,143,.08);color:#1E7A6E;border:1px solid rgba(42,157,143,.2);}
   .act-del{background:rgba(193,68,14,.07);color:#9C3510;border:1px solid rgba(193,68,14,.16);}
 </style>
+<link rel="stylesheet" href="../assets/fishda-theme.css">
 </head>
-<body>
+<body class="theme-fishda theme-dashboard">
 <div id="toastZone"></div>
 
 <!-- ═══════════ SIDEBAR ═══════════ -->
@@ -371,7 +363,6 @@ if (!isset($_SESSION['session_logged'])) {
   <div class="nav-clock" id="navClock">00:00:00</div>
   <div class="nav-section">Main Menu</div>
   <a class="nav-item active" id="link-control" onclick="showTab('control')"><i class="fas fa-sliders"></i>Drying Control</a>
-  <a class="nav-item" id="link-monitor" onclick="showTab('monitor')"><i class="fas fa-gauge-high"></i>Live Monitor</a>
   <a class="nav-item" id="link-history" onclick="showTab('history')"><i class="fas fa-clock-rotate-left"></i>Drying Records</a>
   <a class="nav-item" id="link-schedule" onclick="showTab('schedule')"><i class="fas fa-calendar-days"></i>Drying Calendar</a>
   <div class="sidebar-user">
@@ -399,40 +390,39 @@ if (!isset($_SESSION['session_logged'])) {
         <span id="deviceStatusText">Checking...</span>
       </span>
     </div>
-    <div class="filter-divider"></div>
-    <span class="filter-label">Session:</span>
+   
     <div class="session-status-badge" id="sessionStatusBadge">
+        <span class="filter-label">Session:</span>
       <span class="session-dot" style="background:#8BA7C4;box-shadow:none;"></span>
       <span id="sessionStatusText">No Active Session</span>
     </div>
-    <button onclick="checkExistingSession()" style="margin-left:8px;padding:2px 6px;font-size:9px;background:rgba(59,130,246,.1);color:#3b82f6;border:1px solid rgba(59,130,246,.2);border-radius:4px;cursor:pointer;" title="Refresh session status">🔄</button>
+    <button onclick="checkExistingSession()" style="margin-left:8px;padding:2px 6px;font-size:9px;background:rgba(59,130,246,.1);color:#3b82f6;border:1px solid rgba(59,130,246,.2);border-radius:4px;cursor:pointer;" title="Refresh session status"><i class="fas fa-rotate"></i></button>
   </div>
 
   <div class="content-wrap">
 
-    <!-- ════════════════ TAB: DRYING CONTROL ════════════════ -->
-    <div id="tab-control" class="tab-section active">
+     <div id="tab-control" class="tab-section active">
       <div class="page-header">
-        <div class="page-title">🐟 Drying Control</div>
+        <div class="page-title"><i class="fas fa-fish me-2"></i>Drying Control</div>
         <div class="page-sub">Configure temperature &amp; humidity targets, then start the prototype drying session.</div>
       </div>
 
       <!-- Fish Ready Banner -->
       <div class="fish-ready mb-3" id="fishReadyBanner">
         <div class="d-flex align-items-center gap-3">
-          <span style="font-size:34px">🎉</span>
+          <span style="font-size:34px"><i class="fas fa-circle-check"></i></span>
           <div>
             <div style="font-size:15px;font-weight:800;color:var(--seafoam)">Fish is Ready — Targets Reached!</div>
             <div style="font-size:12px;color:var(--text-muted)" id="fishReadyMsg">Targets reached. Cooldown in progress, system will auto-resume.</div>
           </div>
-          <button onclick="document.getElementById('fishReadyBanner').style.display='none'" style="margin-left:auto;background:transparent;border:none;color:var(--text-muted);font-size:18px;cursor:pointer;">✕</button>
+          <button onclick="document.getElementById('fishReadyBanner').style.display='none'" style="margin-left:auto;background:transparent;border:none;color:var(--text-muted);font-size:18px;cursor:pointer;"><i class="fas fa-xmark"></i></button>
         </div>
       </div>
 
       <!-- Cooldown Banner -->
       <div class="cooldown-banner mb-3" id="cooldownBanner">
         <div class="d-flex align-items-center gap-3">
-          <span style="font-size:34px">🌀</span>
+          <span style="font-size:34px"><i class="fas fa-fan"></i></span>
           <div>
             <div style="font-size:15px;font-weight:800;color:var(--teal)">Cooldown Phase Active</div>
             <div style="font-size:12px;color:var(--text-muted)" id="cooldownMsg">System is cooling down. Fan will restart automatically.</div>
@@ -440,38 +430,75 @@ if (!isset($_SESSION['session_logged'])) {
         </div>
       </div>
 
-      <!-- Live Stats Row -->
+      <!-- Dashboard Overview -->
       <div class="row g-3 mb-4">
-        <div class="col-6 col-lg-3">
-          <div class="stat-card">
-            <div class="stat-icon" style="background:rgba(42,157,143,.1);color:var(--teal)"><i class="fas fa-temperature-high"></i></div>
-            <div class="stat-value" id="liveTemp">—</div>
-            <div class="stat-label" id="tempLabel">Live Temp °C</div>
-            <div class="stat-accent" style="background:var(--teal)"></div>
+        <div class="col-lg-6">
+          <div class="control-card" style="height:100%;">
+            <div class="control-section-title" style="display:flex;justify-content:space-between;align-items:center;">
+              <span><i class="fas fa-wave-square" style="color:var(--teal)"></i>Live Readings</span>
+             </div>
+            <canvas id="miniChart" height="130"></canvas>
           </div>
+        
         </div>
-        <div class="col-6 col-lg-3">
-          <div class="stat-card">
-            <div class="stat-icon" style="background:rgba(82,182,154,.1);color:var(--seafoam)"><i class="fas fa-droplet"></i></div>
-            <div class="stat-value" id="liveHum" style="color:var(--seafoam)">—</div>
-            <div class="stat-label" id="humLabel">Live Humidity %</div>
-            <div class="stat-accent" style="background:var(--seafoam)"></div>
-          </div>
-        </div>
-        <div class="col-6 col-lg-3">
-          <div class="stat-card">
-            <div class="stat-icon" style="background:rgba(244,162,97,.1);color:var(--golden)"><i class="fas fa-clock"></i></div>
-            <div class="stat-value mono" id="elapsedTime" style="font-size:22px;color:var(--golden)">00:00:00</div>
-            <div class="stat-label">Session Duration</div>
-            <div class="stat-accent" style="background:var(--amber)"></div>
-          </div>
-        </div>
-        <div class="col-6 col-lg-3">
-          <div class="stat-card">
-            <div class="stat-icon" style="background:rgba(123,97,255,.1);color:#6344A0"><i class="fas fa-fish"></i></div>
-            <div class="stat-value" id="myTotalSessionsCtrl" style="color:#6344A0">—</div>
-            <div class="stat-label">Total Sessions</div>
-            <div class="stat-accent" style="background:#7b61ff"></div>
+
+        <!-- Right Cards: 2x2 Grid -->
+        <div class="col-lg-6">
+          <div class="row g-3">
+            <!-- Session Duration Card -->
+
+            <!-- Temperature Display Card -->
+            <div class="col-6">
+              <div class="stat-card" style="min-height:130px;">
+                <div class="stat-icon" style="background:rgba(42,157,143,.15);color:var(--teal)"><i class="fas fa-temperature-high"></i></div>
+                <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;font-weight:600;">TEMPERATURE</div>
+                <div style="font-size:36px;font-weight:800;color:var(--teal);font-family:'Space Mono',monospace;margin:10px 0;" id="liveTemp">—</div>
+                <div style="font-size:10px;color:var(--text-muted);">Current reading °C</div>
+                <div class="stat-accent" style="background:var(--teal)"></div>
+              </div>
+            </div>
+
+
+            <div class="col-6">
+              <div class="stat-card" style="min-height:130px;">
+                <div class="stat-icon" style="background:rgba(244,162,97,.1);color:var(--golden)"><i class="fas fa-clock"></i></div>
+                <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;font-weight:600;">SESSION DURATION</div>
+                <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px;">Today's Average</div>
+                <div style="font-size:16px;font-weight:700;color:var(--golden);font-family:'Space Mono',monospace;" id="todayAvgDuration">—</div>
+                <div style="font-size:10px;color:var(--text-muted);margin-top:6px;">
+                  <div>Total Today: <span id="todaySessionCount" style="font-weight:600;color:var(--teal);">—</span></div>
+                  <div>Shortest: <span id="shortestSession" style="font-weight:600;color:var(--seafoam);">—</span></div>
+                  <div>Longest: <span id="longestSession" style="font-weight:600;color:var(--amber);">—</span></div>
+                </div>
+                <div class="stat-accent" style="background:var(--amber)"></div>
+              </div>
+            </div>
+
+                <!-- Humidity Display Card -->
+            <div class="col-6">
+              <div class="stat-card" style="min-height:130px;">
+                <div class="stat-icon" style="background:rgba(46,196,182,.15);color:var(--seafoam)"><i class="fas fa-droplet"></i></div>
+                <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;font-weight:600;">HUMIDITY</div>
+                <div style="font-size:36px;font-weight:800;color:var(--seafoam);font-family:'Space Mono',monospace;margin:10px 0;" id="liveHum">—</div>
+                <div style="font-size:10px;color:var(--text-muted);">Current reading %</div>
+                <div class="stat-accent" style="background:var(--seafoam)"></div>
+              </div>
+            </div>
+
+            <!-- Total Sessions Card -->
+            <div class="col-6">
+              <div class="stat-card" style="min-height:130px;">
+                <div class="stat-icon" style="background:rgba(123,97,255,.1);color:#6344A0"><i class="fas fa-fish"></i></div>
+                <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;font-weight:600;">TOTAL SESSIONS</div>
+                <div class="stat-value" id="myTotalSessionsCtrl" style="color:#6344A0;font-size:42px;margin:20px 0;">—</div>
+                <div style="font-size:10px;color:var(--text-muted);">All-time completed sessions</div>
+                <div class="stat-accent" style="background:#7b61ff"></div>
+              </div>
+            </div>
+
+          
+
+
           </div>
         </div>
       </div>
@@ -515,7 +542,7 @@ if (!isset($_SESSION['session_logged'])) {
               
               <!-- Scheduled Session Info -->
               <div id="scheduledInfo" style="display:none;background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.2);border-radius:8px;padding:8px;margin-bottom:12px;">
-                <div style="font-size:10px;color:var(--text-muted);margin-bottom:2px;">📅 SCHEDULED SESSION</div>
+                <div style="font-size:10px;color:var(--text-muted);margin-bottom:2px;"><i class="fas fa-calendar-days me-1"></i>SCHEDULED SESSION</div>
                 <div style="font-size:11px;font-weight:600;color:#3b82f6;" id="scheduleTitle">Loading...</div>
                 <div style="font-size:10px;color:var(--text-muted);margin-top:2px;" id="scheduleTime">Loading...</div>
               </div>
@@ -523,7 +550,7 @@ if (!isset($_SESSION['session_logged'])) {
               <!-- Session Timer -->
               <div id="sessionTimer" style="display:none;text-align:center;margin-bottom:12px;">
                 <div style="font-size:10px;color:var(--text-muted);margin-bottom:2px;" id="timerLabel">Session Duration</div>
-                <div style="font-size:16px;font-weight:700;color:var(--teal);font-family:'Space Mono',monospace;" id="elapsedTime">00:00:00</div>
+                <div style="font-size:24px;font-weight:700;color:var(--teal);font-family:'Space Mono',monospace;" id="elapsedTime">00:00:00</div>
                 
                 <!-- Scheduled Duration Info -->
                 <div id="scheduledDuration" style="display:none;margin-top:4px;">
@@ -534,6 +561,13 @@ if (!isset($_SESSION['session_logged'])) {
                 <div id="cycleCount" style="display:none;margin-top:4px;font-size:9px;color:var(--text-muted);">
                   Heating Cycles: <span style="color:var(--seafoam);font-weight:600;" id="cycleNumber">0</span>
                 </div>
+              </div>
+
+              <!-- Cooldown Countdown Timer -->
+              <div id="cooldownTimer" style="display:none;text-align:center;margin-bottom:12px;background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.2);border-radius:8px;padding:12px;">
+                <div style="font-size:10px;color:var(--text-muted);margin-bottom:4px;font-weight:600;text-transform:uppercase;"><i class="fas fa-fan me-1"></i>Cooldown Phase</div>
+                <div style="font-size:20px;font-weight:700;color:#3b82f6;font-family:'Space Mono',monospace;" id="cooldownCountdown">05:00</div>
+                <div style="font-size:9px;color:var(--text-muted);margin-top:4px;">Fans OFF • Will auto-resume</div>
               </div>
 
               <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">Moisture Reduction</div>
@@ -552,7 +586,7 @@ if (!isset($_SESSION['session_logged'])) {
 
               <!-- Hardware Status Card -->
               <div style="background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.2);border-radius:8px;padding:10px;margin-top:12px;display:none;" id="hwStatusCard">
-                <div style="font-size:10px;color:var(--text-muted);margin-bottom:8px;font-weight:600;text-transform:uppercase;">⚡ Hardware Status</div>
+                <div style="font-size:10px;color:var(--text-muted);margin-bottom:8px;font-weight:600;text-transform:uppercase;"><i class="fas fa-bolt me-1"></i>Hardware Status</div>
                 <div class="row g-2" style="font-size:11px;">
                   <div class="col-4">
                     <div style="display:flex;align-items:center;gap:4px;padding:6px;background:rgba(0,0,0,.05);border-radius:4px;">
@@ -579,81 +613,14 @@ if (!isset($_SESSION['session_logged'])) {
         </div>
 
         <!-- Live Mini Chart -->
-        <div class="col-lg-4">
-          <div class="control-card" style="height:100%;">
-            <div class="control-section-title"><i class="fas fa-wave-square" style="color:var(--teal)"></i>Live Readings</div>
-            <canvas id="miniChart" height="130"></canvas>
-          </div>
-        </div>
+        
       </div>
     </div><!-- /tab-control -->
-
-    <!-- ════════════════ TAB: LIVE MONITOR ════════════════ -->
-    <div id="tab-monitor" class="tab-section">
-      <div class="page-header">
-        <div class="page-title">📡 Live Monitor</div>
-        <div class="page-sub" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-          <span>Real-time telemetry for the active prototype drying session.</span>
-          <span class="proto-online-pill" id="protoOnlineHeader"><span class="online-dot" id="protoOnlineHeaderDot"></span><span id="protoOnlineHeaderText">Checking...</span></span>
-        </div>
-      </div>
-      <div class="row g-3">
-        <div class="col-md-6">
-          <div class="monitor-card">
-            <div class="row g-3">
-              <div class="col-6">
-                <div class="gauge-block">
-                  <div class="gauge-ring">
-                    <svg viewBox="0 0 100 100">
-                      <circle cx="50" cy="50" r="42" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="7"/>
-                      <circle cx="50" cy="50" r="42" fill="none" stroke="#2A9D8F" stroke-width="7" stroke-dasharray="263.9" id="tempArc" stroke-dashoffset="197" stroke-linecap="round" transform="rotate(-90 50 50)"/>
-                    </svg>
-                    <div class="gauge-text">
-                      <div class="gauge-val" id="gaugeTemp">—</div>
-                      <div class="gauge-unit">°C</div>
-                    </div>
-                  </div>
-                  <div class="gauge-name">Temperature</div>
-                </div>
-              </div>
-              <div class="col-6">
-                <div class="gauge-block">
-                  <div class="gauge-ring">
-                    <svg viewBox="0 0 100 100">
-                      <circle cx="50" cy="50" r="42" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="7"/>
-                      <circle cx="50" cy="50" r="42" fill="none" stroke="#2EC4B6" stroke-width="7" stroke-dasharray="263.9" id="humArc" stroke-dashoffset="197" stroke-linecap="round" transform="rotate(-90 50 50)"/>
-                    </svg>
-                    <div class="gauge-text">
-                      <div class="gauge-val" id="gaugeHum" style="color:#2EC4B6">—</div>
-                      <div class="gauge-unit">%RH</div>
-                    </div>
-                  </div>
-                  <div class="gauge-name">Humidity</div>
-                </div>
-              </div>
-            </div>
-            <div class="mt-3 d-flex flex-wrap justify-content-center" id="hwChips">
-              <span class="hw-chip"><span class="dot-off"></span>Fan 1</span>
-              <span class="hw-chip"><span class="dot-off"></span>Fan 2</span>
-              <span class="hw-chip"><span class="dot-off"></span>Heater 1</span>
-              <span class="hw-chip"><span class="dot-off"></span>Heater 2</span>
-              <span class="hw-chip"><span class="dot-off"></span>Exhaust</span>
-            </div>
-          </div>
-        </div>
-        <div class="col-md-6">
-          <div class="glass-card" style="padding:20px;height:100%;">
-            <div class="card-title mb-3"><span class="card-title-dot me-2" style="background:var(--teal)"></span>Live Telemetry</div>
-            <canvas id="monitorChart" height="130"></canvas>
-          </div>
-        </div>
-      </div>
-    </div><!-- /tab-monitor -->
 
     <!-- ════════════════ TAB: MY SESSIONS ════════════════ -->
     <div id="tab-history" class="tab-section">
       <div class="page-header">
-        <div class="page-title">🗂️ Drying Records</div>
+        <div class="page-title"><i class="fas fa-folder-open me-2"></i>Drying Records</div>
         <div class="page-sub">// All completed prototype cycles for <?= $model_name ?> — <?= $given_code ?></div>
       </div>
       <div class="row g-3 mb-4">
@@ -698,11 +665,11 @@ if (!isset($_SESSION['session_logged'])) {
         <div class="section-scroll">
           <table class="data-table">
             <thead><tr>
-              <th>#</th><th>Date &amp; Time</th><th>Duration</th>
-              <th>Avg Temp</th><th>Avg Humidity</th><th>Result</th><th>Action</th>
+              <th>#</th><th>Date &amp; Time</th><th>Operator</th><th>Duration</th>
+              <th>Avg Temp</th><th>Avg Humidity</th><th>Status</th><th>Action</th>
             </tr></thead>
             <tbody id="myRecordsBody">
-              <tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-muted)"><i class="fas fa-spinner fa-spin me-2"></i>Loading…</td></tr>
+              <tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted)"><i class="fas fa-spinner fa-spin me-2"></i>Loading…</td></tr>
             </tbody>
           </table>
         </div>
@@ -710,7 +677,7 @@ if (!isset($_SESSION['session_logged'])) {
       <div class="glass-card mt-4" id="detailChartCard" style="display:none;padding:22px;">
         <div class="d-flex align-items-center justify-content-between mb-3">
           <div style="font-family:'Playfair Display',serif;font-size:14px;font-weight:800;color:var(--text-primary)" id="detailChartTitle">Session Detail</div>
-          <button onclick="closeDetailChart()" class="btn-outline-cmd">✕ Close</button>
+          <button onclick="closeDetailChart()" class="btn-outline-cmd"><i class="fas fa-xmark me-1"></i>Close</button>
         </div>
         <canvas id="detailChart" height="150"></canvas>
       </div>
@@ -720,7 +687,7 @@ if (!isset($_SESSION['session_logged'])) {
     <div id="tab-schedule" class="tab-section">
       <div class="d-flex align-items-center justify-content-between mb-4">
         <div>
-          <div class="page-title">📅 Drying Calendar</div>
+          <div class="page-title"><i class="fas fa-calendar-days me-2"></i>Drying Calendar</div>
           <div class="page-sub">Plan and manage your upcoming drying batches.</div>
         </div>
         <button class="btn-primary" onclick="openScheduleModal()"><i class="fas fa-plus me-2"></i>Add Batch</button>
@@ -752,7 +719,7 @@ if (!isset($_SESSION['session_logged'])) {
 <!-- ═══════════ SCHEDULE MODAL ═══════════ -->
 <div class="modal-backdrop" id="scheduleModal" style="display:none;" onclick="if(event.target===this)closeScheduleModal()">
   <div class="modal-panel">
-    <div class="modal-title">📅 Add New Batch</div>
+    <div class="modal-title"><i class="fas fa-calendar-plus me-2"></i>Add New Batch</div>
     <div class="form-row">
       <label class="form-label">Batch Title</label>
       <input type="text" id="sched_title" class="form-input" value="Tilapia Batch" placeholder="Tilapia / Bangus / etc.">
@@ -813,7 +780,7 @@ if (!isset($_SESSION['session_logged'])) {
   <div class="modal-panel">
     <div class="d-flex align-items-center justify-content-between mb-3">
       <div class="modal-title" id="evtTitle" style="margin-bottom:0">Event</div>
-      <button onclick="closeEventModal()" style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:5px 11px;font-size:11px;font-weight:600;color:var(--text-muted);cursor:pointer;">✕</button>
+      <button onclick="closeEventModal()" style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:5px 11px;font-size:11px;font-weight:600;color:var(--text-muted);cursor:pointer;"><i class="fas fa-xmark"></i></button>
     </div>
     <div id="evtBody" style="display:flex;flex-direction:column;gap:0;"></div>
     <div id="evtActions" style="margin-top:10px;"></div>
@@ -828,7 +795,7 @@ const GIVEN_CODE = "<?= $given_code ?>";
 // ════════════════════════════════════════════════════════
 //  STATE
 // ════════════════════════════════════════════════════════
-let miniChartInst=null, monitorChartInst=null, detailChartInst=null, userCal=null;
+let miniChartInst=null, detailChartInst=null, userCal=null;
 let sessionRunning=false, sessionId=null, startTimeEpoch=null;
 let currentSetTemp=50, currentSetHum=30;
 let liveLabels=[], liveTemps=[], liveHums=[];
@@ -849,7 +816,6 @@ function showTab(tab){
   document.getElementById('tab-'+tab).classList.add('active');
   const lnk=document.getElementById('link-'+tab);
   if(lnk) lnk.classList.add('active');
-  if(tab==='monitor') initMonitorChart();
   if(tab==='history') fetchMyRecords();
   if(tab==='schedule') initUserCalendar();
 }
@@ -948,15 +914,27 @@ async function stopSession(){
     });
     
     const fd = new FormData();
-    fd.append('action', 'stop_session');
-    if (sessionId) fd.append('session_id', sessionId);
+    fd.append('action', 'emergency_stop');
     
-    const response = await fetch('../api/session_api.php', {
+    const response = await fetch('../api/controls_api.php', {
       method: 'POST', 
       body: fd
     });
     
-    const j = await response.json();
+    // Check if response is OK
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    // Get response text first to check if it's valid JSON
+    const responseText = await response.text();
+    let j;
+    try {
+      j = JSON.parse(responseText);
+    } catch (parseError) {
+      console.error('Failed to parse JSON response:', responseText);
+      throw new Error('Invalid server response format');
+    }
     
     loadingToast.close();
     
@@ -983,7 +961,8 @@ async function stopSession(){
     }
   } catch (e) {
     Swal.close();
-    showToast('error', 'Network Error', 'Could not connect to server to stop session.', 4000);
+    console.error('Stop session error:', e);
+    showToast('error', 'Network Error', e.message || 'Could not connect to server to stop session.', 4000);
   }
 }
 
@@ -995,6 +974,8 @@ function hideBanners(){
 function updateControlUI(running,temp,hum){
   const section=document.getElementById('controlSection');
   const stopBtn=document.getElementById('stopBtn');
+  const sessionTimer=document.getElementById('sessionTimer');
+  const cooldownTimer=document.getElementById('cooldownTimer');
   
   if(running){
     section.innerHTML=`<div style="text-align:center;color:var(--text-muted);font-size:11px;padding:12px;background:rgba(42,157,143,.05);border-radius:8px;border:1px solid rgba(42,157,143,.15);"><i class="fas fa-cog fa-spin me-2"></i>Session Active</div>`;
@@ -1005,6 +986,10 @@ function updateControlUI(running,temp,hum){
     
     // Show stop button when session is running
     if(stopBtn) stopBtn.style.display='inline-block';
+    
+    // Show session timer when active
+    if(sessionTimer) sessionTimer.style.display='block';
+    if(cooldownTimer) cooldownTimer.style.display='none';
     
   } else {
     section.innerHTML=`<button class="btn-start" id="startBtn" onclick="startSession()"><i class="fas fa-play me-2"></i>Start Drying Session</button>`;
@@ -1017,6 +1002,13 @@ function updateControlUI(running,temp,hum){
     
     // Hide stop button when session is not running
     if(stopBtn) stopBtn.style.display='none';
+    
+    // Hide session timer and cooldown timer when idle
+    if(sessionTimer) sessionTimer.style.display='none';
+    if(cooldownTimer) cooldownTimer.style.display='none';
+    
+    // Reset elapsed time display
+    document.getElementById('elapsedTime').textContent='00:00:00';
     
     // Update button state based on online status
     updateStartButtonState();
@@ -1169,20 +1161,30 @@ function startTimer(){
 let cooldownCountdownInterval=null;
 function showCooldownCountdown(remainingSeconds){
   clearInterval(cooldownCountdownInterval);
-  const timerEl = document.getElementById('elapsedTime');
-  if(!timerEl) return;
+  clearInterval(timerInterval); // Stop normal timer
+  
+  // Hide session timer, show cooldown timer
+  const sessionTimer = document.getElementById('sessionTimer');
+  const cooldownTimer = document.getElementById('cooldownTimer');
+  const cooldownCountdown = document.getElementById('cooldownCountdown');
+  
+  if(sessionTimer) sessionTimer.style.display = 'none';
+  if(cooldownTimer) cooldownTimer.style.display = 'block';
+  
+  if(!cooldownCountdown) return;
 
   cooldownCountdownInterval = setInterval(()=>{
     remainingSeconds--;
     if(remainingSeconds < 0) {
       clearInterval(cooldownCountdownInterval);
+      if(cooldownTimer) cooldownTimer.style.display = 'none';
+      if(sessionTimer) sessionTimer.style.display = 'block';
       startTimer(); // Resume normal timer
       return;
     }
-    const h = Math.floor(remainingSeconds/3600).toString().padStart(2,'0');
-    const m = Math.floor((remainingSeconds%3600)/60).toString().padStart(2,'0');
+    const m = Math.floor(remainingSeconds/60).toString().padStart(2,'0');
     const s = (remainingSeconds%60).toString().padStart(2,'0');
-    timerEl.textContent = `${h}:${m}:${s}`;
+    cooldownCountdown.textContent = `${m}:${s}`;
   }, 1000);
 }
 
@@ -1280,28 +1282,50 @@ function updateDryingProgressDisplay(data) {
 async function pollSensorAlways(){
   try{
     // Always poll live sensor data, even when idle
-    const j=await(await fetch(`../api/session_api.php?action=get_live_data&proto_id=${PROTO_ID}`)).json();
+    const url = `../api/session_api.php?action=get_live_data&proto_id=${PROTO_ID}`;
+    console.log(`🔄 [${new Date().toLocaleTimeString()}] Polling idle sensor...`);
+    
+    const j=await(await fetch(url)).json();
+    console.log('📊 Idle sensor response:', j);
+    
     if(j.status==='success'&&j.data){
       const d=j.data;
-      const t=parseFloat(d.recorded_temp);
-      const h=parseFloat(d.recorded_humidity);
+      const isOnline = d.device_online !== false; // true if online or not specified
+      
+      if(isOnline && d.recorded_temp !== null){
+        const t=parseFloat(d.recorded_temp);
+        const h=parseFloat(d.recorded_humidity);
+        console.log(`🌡 Temp: ${t}°C, 💧 Hum: ${h}%, Phase: ${d.phase}`);
 
-      // Show live data (even if idle) — display if we have any sensor data
-      if(d.recorded_temp !== null && !isNaN(t)){
         document.getElementById('liveTemp').textContent=t.toFixed(1);
         document.getElementById('liveHum').textContent=h.toFixed(1);
-        if(document.getElementById('gaugeTemp')){
-          document.getElementById('gaugeTemp').textContent=t.toFixed(1);
-          document.getElementById('gaugeHum').textContent=h.toFixed(1);
-          updateGaugeArc('tempArc',t,80);
-          updateGaugeArc('humArc',h,100);
-        }
+        
+        // Update device status indicator
+        updateDeviceStatus(true);
         updateMiniChart(t,h);
+        console.log('✅ UI updated successfully');
+      } else {
+        // Device offline or no data
+        console.log('⚠️ Device offline or no sensor data');
+        document.getElementById('liveTemp').textContent='—';
+        document.getElementById('liveHum').textContent='—';
+        updateDeviceStatus(false);
       }
+    } else {
+      console.log('❌ API returned error or no data');
+      document.getElementById('liveTemp').textContent='—';
+      document.getElementById('liveHum').textContent='—';
+      updateDeviceStatus(false);
     }
-  }catch(e){}
+  }catch(e){
+    console.error('❌ Polling error:', e);
+    document.getElementById('liveTemp').textContent='—';
+    document.getElementById('liveHum').textContent='—';
+    updateDeviceStatus(false);
+  }
   setTimeout(pollSensorAlways, 3000);
 }
+ 
 
 // ════════════════════════════════════════════════════════
 //  LIVE POLLING — session data (every 3s when running)
@@ -1356,12 +1380,7 @@ async function pollLiveData(){
         if(d.recorded_temp!==null){
           document.getElementById('liveTemp').textContent=temp.toFixed(1);
           document.getElementById('liveHum').textContent=hum.toFixed(1);
-          if(document.getElementById('gaugeTemp')){
-            document.getElementById('gaugeTemp').textContent=temp.toFixed(1);
-            document.getElementById('gaugeHum').textContent=hum.toFixed(1);
-            updateGaugeArc('tempArc',temp,80);
-            updateGaugeArc('humArc',hum,100);
-          }
+          
           if(!refreshLiveChartsFromLogs(d.recent_logs)){
             updateMiniChart(temp,hum);
           }
@@ -1373,17 +1392,19 @@ async function pollLiveData(){
       // ── Normal running phase ─────────────────────────────
       document.getElementById('cooldownBanner').style.display='none';
       clearInterval(cooldownCountdownInterval); // Stop cooldown countdown if running
+      
+      // Hide cooldown timer, show session timer
+      const cooldownTimer = document.getElementById('cooldownTimer');
+      const sessionTimerEl = document.getElementById('sessionTimer');
+      if(cooldownTimer) cooldownTimer.style.display = 'none';
+      if(sessionTimerEl) sessionTimerEl.style.display = 'block';
+      
       startTimer(); // Resume normal elapsed time timer
 
       if(d.recorded_temp!==null){
         document.getElementById('liveTemp').textContent=temp.toFixed(1);
         document.getElementById('liveHum').textContent=hum.toFixed(1);
-        if(document.getElementById('gaugeTemp')){
-          document.getElementById('gaugeTemp').textContent=temp.toFixed(1);
-          document.getElementById('gaugeHum').textContent=hum.toFixed(1);
-          updateGaugeArc('tempArc',temp,80);
-          updateGaugeArc('humArc',hum,100);
-        }
+        
         updateHWChips(d);
         updatePhase(d.phase);
         if(!refreshLiveChartsFromLogs(d.recent_logs)){
@@ -1446,6 +1467,31 @@ function updateHWChips(d){
 
   // Update hardware status card in drying progress
   updateHardwareStatusCard(d);
+  
+  // Update fan indicators in live reading card
+  updateFanIndicators(d);
+}
+
+// ── Update fan indicators in LIVE READING card ──
+function updateFanIndicators(d) {
+  const fan1On = parseInt(d.fan1 || 0) === 1;
+  const fan2On = parseInt(d.fan2 || 0) === 1;
+  
+  const fan1Dot = document.getElementById('fan1Dot');
+  const fan2Dot = document.getElementById('fan2Dot');
+  const fan1Indicator = document.getElementById('fan1Indicator');
+  const fan2Indicator = document.getElementById('fan2Indicator');
+  
+  if(fan1Dot && fan2Dot){
+    fan1Dot.style.background = fan1On ? '#10b981' : '#ccc';
+    fan2Dot.style.background = fan2On ? '#10b981' : '#ccc';
+    
+    fan1Indicator.style.background = fan1On ? 'rgba(16,185,129,.15)' : 'rgba(0,0,0,.08)';
+    fan2Indicator.style.background = fan2On ? 'rgba(16,185,129,.15)' : 'rgba(0,0,0,.08)';
+    
+    document.getElementById('fan1Label').textContent = fan1On ? 'Fan 1 • ON' : 'Fan 1';
+    document.getElementById('fan2Label').textContent = fan2On ? 'Fan 2 • ON' : 'Fan 2';
+  }
 }
 
 // ── Update hardware status indicators in DRYING PROGRESS card ──
@@ -1598,25 +1644,6 @@ function initLiveChart(){
   });
 }
 
-function initMonitorChart(){
-  if(monitorChartInst) return;
-  const ctx=document.getElementById('monitorChart').getContext('2d');
-  monitorChartInst=new Chart(ctx,{
-    type:'line',
-    data:{labels:[],datasets:[
-      {label:'Temp °C',data:[],borderColor:'#2A9D8F',borderWidth:2,pointRadius:2,tension:.4,fill:false},
-      {label:'Humidity %',data:[],borderColor:'#2EC4B6',borderWidth:2,pointRadius:2,tension:.4,fill:false}
-    ]},
-    options:{
-      responsive:true,
-      plugins:{legend:{labels:{font:{size:11,family:'DM Sans'},color:'#4A6FA5'}}},
-      scales:{
-        x:{grid:{color:'rgba(0,0,0,.04)'},ticks:{font:{size:9,family:'DM Sans'},color:'#8BA7C4'}},
-        y:{grid:{color:'rgba(0,0,0,.04)'},ticks:{font:{size:9,family:'DM Sans'},color:'#8BA7C4'}}
-      }
-    }
-  });
-}
 
 function updateMiniChart(temp,hum){
   const now=new Date().toLocaleTimeString('en-PH',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
@@ -1629,16 +1656,6 @@ function updateMiniChart(temp,hum){
     miniChartInst.data.datasets.forEach(d=>d.data.shift());
   }
   miniChartInst.update('none');
-  if(monitorChartInst){
-    monitorChartInst.data.labels.push(now);
-    monitorChartInst.data.datasets[0].data.push(temp);
-    monitorChartInst.data.datasets[1].data.push(hum);
-    if(monitorChartInst.data.labels.length>60){
-      monitorChartInst.data.labels.shift();
-      monitorChartInst.data.datasets.forEach(d=>d.data.shift());
-    }
-    monitorChartInst.update('none');
-  }
 }
 
 function refreshLiveChartsFromLogs(logs){
@@ -1655,12 +1672,6 @@ function refreshLiveChartsFromLogs(logs){
     miniChartInst.data.datasets[0].data=temps.slice();
     miniChartInst.data.datasets[1].data=hums.slice();
     miniChartInst.update('none');
-  }
-  if(monitorChartInst){
-    monitorChartInst.data.labels=labels.slice();
-    monitorChartInst.data.datasets[0].data=temps.slice();
-    monitorChartInst.data.datasets[1].data=hums.slice();
-    monitorChartInst.update('none');
   }
   return true;
 }
@@ -1685,22 +1696,23 @@ async function fetchMyRecords(){
         <tr>
           <td class="mono" style="color:var(--teal)">${i+1}</td>
           <td style="font-size:11.5px;color:var(--text-muted)">${s.start_time?.slice(0,16)||'—'}</td>
+          <td style="font-size:10px;color:var(--text-primary);font-weight:600;">${s.display_name || s.device_info || 'FISDA - Unknown Device'}</td>
           <td class="mono">${s.duration?.slice(0,8)||'—'}</td>
           <td style="font-weight:600;color:var(--golden)">${s.avg_temp?parseFloat(s.avg_temp).toFixed(1)+'°C':'—'}</td>
           <td style="font-weight:600;color:var(--seafoam)">${s.avg_hum?parseFloat(s.avg_hum).toFixed(1)+'%':'—'}</td>
-          <td><span class="pill pill-${s.status}">${s.status}</span></td>
+          <td><span class="pill pill-${s.display_status || s.status}" style="text-transform:uppercase;">${s.display_status || s.status || '—'}</span></td>
           <td><button onclick="viewSessionDetail(${s.session_id})" class="act-btn act-view">Detail</button></td>
         </tr>`).join('');
     } else {
       document.getElementById('myTotalSessionsCtrl').textContent='0';
-      document.getElementById('myRecordsBody').innerHTML=`<tr><td colspan="7" style="text-align:center;padding:48px;color:var(--text-muted)">
+      document.getElementById('myRecordsBody').innerHTML=`<tr><td colspan="8" style="text-align:center;padding:48px;color:var(--text-muted)">
         <div style="font-size:28px;margin-bottom:8px">🐟</div>
         <div style="font-size:13px;font-weight:700;color:var(--text-primary)">No sessions yet</div>
         <div style="font-size:11.5px;margin-top:3px">Start a prototype drying session to see your records here.</div>
       </td></tr>`;
     }
   }catch(e){
-    document.getElementById('myRecordsBody').innerHTML=`<tr><td colspan="7" style="text-align:center;padding:28px;color:var(--text-muted)">No data found.</td></tr>`;
+    document.getElementById('myRecordsBody').innerHTML=`<tr><td colspan="8" style="text-align:center;padding:28px;color:var(--text-muted)">No data found.</td></tr>`;
   }
 }
 
@@ -1796,7 +1808,7 @@ function initUserCalendar(){
     headerToolbar:{left:'prev,next today',center:'title',right:'dayGridMonth,timeGridWeek,listMonth'},
     height:480,nowIndicator:true,
     events:async(info,success,failure)=>{
-      try{ const r=await fetch('../api/schedule_api.php?action=get_calendar_events'); const j=await r.json(); success(j.status==='success'?j.data:[]); }
+      try{ const r=await fetch('../api/calendar_fixed.php'); const j=await r.json(); console.log('Calendar API response:', j); success(j.status==='success'?j.data:[]); }
       catch(e){ failure(e); }
     },
     eventClick:(info)=>showEventModal(info.event)
@@ -1817,7 +1829,7 @@ async function loadUserSchedules(){
           <div style="font-weight:700;font-size:12.5px;color:var(--text-primary)">${s.title}</div>
           <div style="font-size:10.5px;color:var(--text-muted)">${s.sched_date} ${s.sched_time?.slice(0,5)}</div>
         </div>
-        <span class="pill pill-${s.status}" style="flex-shrink:0;">${s.status}</span>
+        <span class="pill pill-${s.status}" style="flex-shrink:0;">${s.status === 'Running' ? 'ONGOING' : s.status}</span>
       </div>`).join('');
   }catch(e){}
 }
@@ -1832,7 +1844,54 @@ function showEventModal(event){
     (p.notes?`<div style="background:var(--surface-2);border-radius:8px;padding:10px;font-size:11.5px;color:var(--text-muted);margin-top:8px">${p.notes}</div>`:'');
     document.getElementById('evtActions').innerHTML=`<button onclick="deleteSchedule(${p.schedule_id});closeEventModal()" class="act-btn act-del" style="width:100%;padding:8px;"><i class="fas fa-trash me-1"></i>Delete Schedule</button>`;
   } else {
-    html=evRow('Session #',`<span class="mono" style="color:var(--teal)">#${p.session_id}</span>`)+evRow('Start',event.startStr?.slice(0,16).replace('T',' '))+evRow('End',p.end_time?.slice(0,16)||'—')+`<div style="display:flex;justify-content:space-between;padding:9px 0;font-size:12.5px;"><span style="color:var(--text-muted)">Status</span><span class="pill pill-${p.status}">${p.status}</span></div>`;
+    // Session event
+    const startTime = p.start_time || event.startStr;
+    const endTime = p.end_time;
+    
+    // Calculate duration if both times are available
+    let durationText = '—';
+    if (startTime && endTime) {
+      const start = new Date(startTime);
+      const end = new Date(endTime);
+      const diffMs = end - start;
+      const diffMins = Math.floor(diffMs / 60000);
+      const hours = Math.floor(diffMins / 60);
+      const mins = diffMins % 60;
+      durationText = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+    }
+    
+    // Format end time display
+    let endTimeDisplay = '—';
+    if (endTime) {
+      endTimeDisplay = endTime.slice(0,16).replace('T',' ');
+    } else if (p.status === 'Running') {
+      endTimeDisplay = '<span style="color: #3b82f6;">⏳ Ongoing</span>';
+    } else {
+      endTimeDisplay = '<span style="color: #dc3545;">⚠️ Not recorded</span>';
+    }
+    
+    // Status badge with proper colors and fallback
+    const status = p.status || 'Unknown';
+    let statusColor = '#6b7280';
+    let statusIcon = '❓';
+    
+    switch(status) {
+      case 'Completed': statusColor = '#10b981'; statusIcon = '✅'; break;
+      case 'Interrupted': statusColor = '#f97316'; statusIcon = '⚠️'; break;
+      case 'Terminated': statusColor = '#dc3545'; statusIcon = '🛑'; break;
+      case 'Running': statusColor = '#3b82f6'; statusIcon = '🔄'; break;
+      case 'Unknown': statusColor = '#6b7280'; statusIcon = '❓'; break;
+    }
+    const statusBadge = `<span style="background: ${statusColor}; color: white; padding: 3px 10px; border-radius: 12px; font-size: 11px;">${statusIcon} ${status}</span>`;
+    
+    html=evRow('Session #',`<span class="mono" style="color:var(--teal)">#${p.session_id}</span>`)+
+         evRow('Start',startTime.slice(0,16).replace('T',' '))+
+         evRow('End',endTimeDisplay)+
+         evRow('Duration',durationText)+
+         `<div style="display:flex;justify-content:space-between;padding:9px 0;font-size:12.5px;border-bottom:1px solid var(--border);"><span style="color:var(--text-muted)">Status</span>${statusBadge}</div>`+
+         evRow('Temperature',`${p.set_temp || '—'}°C`)+
+         evRow('Humidity',`${p.set_humidity || '—'}%`)+
+         `<div style="margin-top:12px;padding:8px;background:var(--surface-2);border-radius:6px;font-size:11px;color:var(--text-muted)"><strong>Device:</strong> ${p.device_info || 'Unknown'}</div>`;
     document.getElementById('evtActions').innerHTML='';
   }
   document.getElementById('evtBody').innerHTML=html;
@@ -1944,7 +2003,36 @@ document.getElementById('elapsedTime').textContent='00:00:00';
 checkExistingSession();  // ← CHECK FOR EXISTING SESSION ON PAGE LOAD
 pollSensorAlways();
 pollPrototypeStatus();
+fetchTodayStats(); // Fetch today's session statistics
 protoStatusTimer=setInterval(pollPrototypeStatus,5000);
+
+// ── Fetch today's session statistics ──
+async function fetchTodayStats(){
+  try{
+    const j=await(await fetch(`../api/session_api.php?action=get_today_stats`)).json();
+    if(j.status==='success'&&j.data){
+      const d=j.data;
+      // Update session duration card
+      if(document.getElementById('todayAvgDuration')){
+        document.getElementById('todayAvgDuration').textContent = d.today_avg || '—';
+      }
+      if(document.getElementById('todaySessionCount')){
+        document.getElementById('todaySessionCount').textContent = d.today_count || '0';
+      }
+      if(document.getElementById('shortestSession')){
+        document.getElementById('shortestSession').textContent = d.today_shortest || '—';
+      }
+      if(document.getElementById('longestSession')){
+        document.getElementById('longestSession').textContent = d.today_longest || '—';
+      }
+      if(document.getElementById('myTotalSessionsCtrl')){
+        document.getElementById('myTotalSessionsCtrl').textContent = d.total_all || '0';
+      }
+    }
+  }catch(e){
+    console.error('Failed to fetch today stats:', e);
+  }
+}
 
 async function pollPrototypeStatus(){
   try{
@@ -1965,17 +2053,18 @@ async function checkExistingSession(){
     if(j.status==='success'&&j.data){
       const d=j.data;
 
+      // Check if device is online
+      const isOnline = d.device_online !== false;
+      updateDeviceStatus(isOnline);
+
       // Display idle sensor data (even if no active session)
-      if(d.recorded_temp!==null && d.recorded_temp!==''){
+      if(isOnline && d.recorded_temp!==null && d.recorded_temp!==''){
         document.getElementById('liveTemp').textContent=parseFloat(d.recorded_temp).toFixed(1);
         document.getElementById('liveHum').textContent=parseFloat(d.recorded_humidity).toFixed(1);
-        if(document.getElementById('gaugeTemp')){
-          document.getElementById('gaugeTemp').textContent=parseFloat(d.recorded_temp).toFixed(1);
-          document.getElementById('gaugeHum').textContent=parseFloat(d.recorded_humidity).toFixed(1);
-          updateGaugeArc('tempArc',parseFloat(d.recorded_temp),80);
-          updateGaugeArc('humArc',parseFloat(d.recorded_humidity),100);
-        }
         updateMiniChart(parseFloat(d.recorded_temp), parseFloat(d.recorded_humidity));
+      } else {
+        document.getElementById('liveTemp').textContent='—';
+        document.getElementById('liveHum').textContent='—';
       }
 
       // Check if there's an active session

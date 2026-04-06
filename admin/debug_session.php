@@ -11,12 +11,14 @@ session_start();
 $proto_id = $_SESSION['proto_id'] ?? null;
 $user_id = $_SESSION['user_id'] ?? null;
 
-echo "<h1>Session Status Debug</h1>";
+echo "<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'><title>Session Status Debug</title><link rel='stylesheet' href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css'><link rel='stylesheet' href='../assets/fishda-theme.css'></head><body class='theme-fishda'><div style='max-width:980px;margin:24px auto;padding:20px;background:#fff;border:1px solid #DDE8EF;border-radius:14px;box-shadow:0 8px 24px rgba(30,136,229,.12)'>";
+echo "<h1 style='font-size:1.35rem;margin-bottom:12px;display:flex;align-items:center;gap:10px;'><i class='fas fa-satellite-dish' style='color:#1E88E5'></i>Session Status Debug</h1>";
 echo "<p><strong>User ID:</strong> " . ($user_id ?: 'Not logged in') . "</p>";
 echo "<p><strong>Prototype ID:</strong> " . ($proto_id ?: 'Not set') . "</p>";
 
 if (!$proto_id) {
-    echo "<p style='color: red;'>⚠️ No prototype ID in session. Please log in properly.</p>";
+    echo "<p style='color:#CC4F24;'><i class='fas fa-triangle-exclamation'></i> No prototype ID in session. Please log in properly.</p>";
+    echo "</div></body></html>";
     exit;
 }
 
@@ -36,7 +38,7 @@ $context = stream_context_create([
 $response = file_get_contents($api_url, false, $context);
 
 if ($response === false) {
-    echo "<p style='color: red;'>❌ API call failed</p>";
+    echo "<p style='color:#CC4F24;'><i class='fas fa-circle-xmark'></i> API call failed</p>";
 } else {
     echo "<h3>API Response:</h3>";
     echo "<pre style='background: #f5f5f5; padding: 10px; border-radius: 5px; overflow: auto;'>";
@@ -47,13 +49,13 @@ if ($response === false) {
         
         // Check for session data
         if ($decoded['status'] === 'success' && isset($decoded['data']['session_id'])) {
-            echo "\n\n✅ <strong>Session Found!</strong>\n";
+            echo "\n\n[OK] <strong>Session Found!</strong>\n";
             echo "Session ID: " . $decoded['data']['session_id'] . "\n";
             echo "Status: " . ($decoded['data']['status'] ?? 'Unknown') . "\n";
             echo "Set Temp: " . ($decoded['data']['set_temp'] ?? 'Unknown') . "°C\n";
             echo "Set Humidity: " . ($decoded['data']['set_humidity'] ?? 'Unknown') . "%\n";
         } else {
-            echo "\n\n❌ <strong>No Active Session</strong>\n";
+            echo "\n\n[NO] <strong>No Active Session</strong>\n";
             echo "Reason: " . ($decoded['message'] ?? 'Unknown') . "\n";
         }
     } else {
@@ -72,9 +74,9 @@ try {
     $sessions = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
     if (empty($sessions)) {
-        echo "<p>❌ No running sessions found in database</p>";
+        echo "<p><i class='fas fa-circle-xmark' style='color:#CC4F24'></i> No running sessions found in database</p>";
     } else {
-        echo "<p>✅ Found " . count($sessions) . " running session(s):</p>";
+        echo "<p><i class='fas fa-circle-check' style='color:#26A69A'></i> Found " . count($sessions) . " running session(s):</p>";
         echo "<table border='1' style='border-collapse: collapse; width: 100%;'>";
         echo "<tr><th>Session ID</th><th>User ID</th><th>Status</th><th>Temp</th><th>Humidity</th><th>Start Time</th></tr>";
         
@@ -96,16 +98,17 @@ try {
         });
         
         if (empty($user_sessions)) {
-            echo "<p style='color: orange;'>⚠️ No running sessions belong to current user (ID: $user_id)</p>";
+            echo "<p style='color:#B07C00;'><i class='fas fa-triangle-exclamation'></i> No running sessions belong to current user (ID: $user_id)</p>";
         } else {
-            echo "<p style='color: green;'>✅ Found " . count($user_sessions) . " session(s) for current user</p>";
+            echo "<p style='color:#1E7A6E;'><i class='fas fa-circle-check'></i> Found " . count($user_sessions) . " session(s) for current user</p>";
         }
     }
     
 } catch (Exception $e) {
-    echo "<p style='color: red;'>❌ Database error: " . $e->getMessage() . "</p>";
+    echo "<p style='color:#CC4F24;'><i class='fas fa-circle-xmark'></i> Database error: " . $e->getMessage() . "</p>";
 }
 
 echo "<br><br>";
-echo "<a href='users_dashboard.php'>← Back to Dashboard</a>";
+echo "<a href='users_dashboard.php' style='display:inline-flex;align-items:center;gap:8px;color:#1E88E5;text-decoration:none;font-weight:700;'><i class='fas fa-arrow-left'></i> Back to Dashboard</a>";
+echo "</div></body></html>";
 ?>
