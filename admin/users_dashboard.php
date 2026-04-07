@@ -450,7 +450,7 @@ if (!isset($_SESSION['session_logged'])) {
                 <div class="stat-icon" style="background:rgba(42,157,143,.15);color:var(--teal)"><i class="fas fa-temperature-high"></i></div>
                 <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;font-weight:600;">TEMPERATURE</div>
                 <div style="font-size:36px;font-weight:800;color:var(--teal);font-family:'Space Mono',monospace;margin:10px 0;" id="liveTemp">—</div>
-                <div style="font-size:10px;color:var(--text-muted);">Current reading °C</div>
+                <div style="font-size:10px;color:var(--text-muted);" id="tempLabel">Live Temp °C</div>
                 <div class="stat-accent" style="background:var(--teal)"></div>
               </div>
             </div>
@@ -476,7 +476,7 @@ if (!isset($_SESSION['session_logged'])) {
                 <div class="stat-icon" style="background:rgba(46,196,182,.15);color:var(--seafoam)"><i class="fas fa-droplet"></i></div>
                 <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;font-weight:600;">HUMIDITY</div>
                 <div style="font-size:36px;font-weight:800;color:var(--seafoam);font-family:'Space Mono',monospace;margin:10px 0;" id="liveHum">—</div>
-                <div style="font-size:10px;color:var(--text-muted);">Current reading %</div>
+                <div style="font-size:10px;color:var(--text-muted);" id="humLabel">Live Humidity %</div>
                 <div class="stat-accent" style="background:var(--seafoam)"></div>
               </div>
             </div>
@@ -1272,6 +1272,11 @@ function updateDryingProgressDisplay(data) {
   }
 }
 
+// ── Device status helper used by pollSensorAlways and checkExistingSession ──
+function updateDeviceStatus(isOnline){
+  updatePrototypeOnlineIndicator(true, isOnline, null);
+}
+
 // ════════════════════════════════════════════════════════
 //  LIVE POLLING — always-on sensor (no session needed)
 // ════════════════════════════════════════════════════════
@@ -1542,6 +1547,8 @@ function getHardwareStatusText(phase, isSession) {
 function updateSensorLabels(phase, isSession, temp, targetTemp) {
   const tempLabel = document.getElementById('tempLabel');
   const humLabel = document.getElementById('humLabel');
+  
+  if (!tempLabel || !humLabel) return;
   
   if (!isSession) {
     tempLabel.textContent = 'Live Temp °C';
