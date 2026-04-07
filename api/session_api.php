@@ -177,14 +177,15 @@ switch ($action) {
         }
 
         try {
-            $dbh->prepare("UPDATE drying_sessions SET status='Interrupted', end_time=NOW() WHERE status='Running'")->execute([]);
+            // End any existing running sessions for this prototype
+            $dbh->prepare("UPDATE drying_sessions SET status='Interrupted', end_time=NOW() WHERE status='Running' AND proto_id=:pid")
+                ->execute([':pid' => $proto_id]);
             
-            // Get prototype ID for the session
-            $proto_row = $dbh->query("SELECT id FROM tbl_prototypes WHERE status = 1 LIMIT 1")->fetch();
-            $proto_id = $proto_row ? $proto_row['id'] : 1;
+            // Use the proto_id from session/request, fallback to 1 if not set
+            $session_proto_id = ($proto_id > 0) ? $proto_id : 1;
             
             $stmt = $dbh->prepare("INSERT INTO drying_sessions (user_id,proto_id,schedule_id,set_temp,set_humidity,status,start_time) VALUES(:uid,:pid,:sid,:t,:h,'Running',NOW())");
-            $stmt->execute([':uid'=>$default_user_id,':pid'=>$proto_id,':sid'=>$schedule_id,':t'=>$set_temp,':h'=>$set_hum]);
+            $stmt->execute([':uid'=>$default_user_id,':pid'=>$session_proto_id,':sid'=>$schedule_id,':t'=>$set_temp,':h'=>$set_hum]);
             $session_id = $dbh->lastInsertId();
             // Sync drying_controls — clear any leftover cooldown
             $dbh->prepare("UPDATE drying_controls SET target_temp=:t,target_humidity=:h,status='RUNNING',start_time=NOW(),cooldown_until=NULL WHERE id=1")
@@ -474,15 +475,16 @@ switch ($action) {
     // ============================================================
     case 'get_live_data':
         try {
-            // For proto_id requests, just find the most recent running session
-            // No user_id resolution needed
+            // For proto_id requests, find the running session for this prototype
             if ($proto_id > 0) {
-                $session = $dbh->query(
-                    "SELECT ds.session_id, ds.set_temp, ds.set_humidity, ds.start_time, ds.user_id
+                $sessionStmt = $dbh->prepare(
+                    "SELECT ds.session_id, ds.set_temp, ds.set_humidity, ds.start_time, ds.user_id, ds.schedule_id
                      FROM drying_sessions ds
-                     WHERE ds.status = 'Running'
+                     WHERE ds.status = 'Running' AND ds.proto_id = :proto_id
                      ORDER BY ds.start_time DESC LIMIT 1"
-                )->fetch(PDO::FETCH_ASSOC);
+                );
+                $sessionStmt->execute([':proto_id' => $proto_id]);
+                $session = $sessionStmt->fetch(PDO::FETCH_ASSOC);
             } else {
                 // For user_id requests, use the dynamic scheduler
                 $session = getCurrentSessionStatus($dbh, $user_id);
@@ -634,13 +636,19 @@ switch ($action) {
             $log = $logStmt->fetch(PDO::FETCH_ASSOC);
 
             if (!$log) {
+                // No logs yet - try to get data from live_sensor_cache
+                $liveCache = $dbh->query(
+                    "SELECT temperature, humidity, phase, heater1_state, fan1_state, exhaust_state, timestamp
+                     FROM live_sensor_cache WHERE id = 1 LIMIT 1"
+                )->fetch(PDO::FETCH_ASSOC);
+                
                 sendResponse('success', 'Prototype session running, awaiting first reading.', [
-                    'recorded_temp'      => null,
-                    'recorded_humidity'  => null,
-                    'phase'              => 'Idle',
-                    'heater_state'       => 0,
-                    'exhaust_state'      => 0,
-                    'fan_state'          => 0,
+                    'recorded_temp'      => $liveCache ? floatval($liveCache['temperature']) : null,
+                    'recorded_humidity'  => $liveCache ? floatval($liveCache['humidity']) : null,
+                    'phase'              => $liveCache ? ($liveCache['phase'] ?? 'Idle') : 'Idle',
+                    'heater_state'       => $liveCache ? (int)($liveCache['heater1_state'] ?? 0) : 0,
+                    'exhaust_state'      => $liveCache ? (int)($liveCache['exhaust_state'] ?? 0) : 0,
+                    'fan_state'          => $liveCache ? (int)($liveCache['fan1_state'] ?? 0) : 0,
                     'session_id'         => (int)$sid,
                     'set_temp'           => floatval($session['set_temp']),
                     'set_humidity'       => floatval($session['set_humidity']),
@@ -839,22 +847,20 @@ switch ($action) {
                 }
             }
             
-            $stmt = $dbh->prepare(
-                "SELECT ds.session_id, ds.start_time, ds.end_time, ds.set_temp, ds.set_humidity, ds.status, ds.schedule_id, ds.proto_id,
+            $sql = "SELECT ds.session_id, ds.start_time, ds.end_time, ds.set_temp, ds.set_humidity, ds.status, ds.schedule_id, ds.proto_id,
                     TIMEDIFF(COALESCE(ds.end_time,NOW()),ds.start_time) AS duration,
                     ROUND(AVG(dl.recorded_temp),2)     AS avg_temp,
                     ROUND(AVG(dl.recorded_humidity),2) AS avg_hum,
                     u.username, u.permission,
                     CONCAT('FISDA - ', COALESCE(p.model_name, 'Fishda'), ' + ', COALESCE(p.given_code, 'FD2026')) AS device_info,
                     p.model_name, p.given_code,
-                    -- Show device info for ALL sessions
                     CONCAT('FISDA - ', COALESCE(p.model_name, 'Fishda'), ' + ', COALESCE(p.given_code, 'FD2026')) AS display_name,
-                    -- Status logic: Manual = Completed, Scheduled + Interrupted = Terminated
                     CASE 
                         WHEN ds.status = 'Running' THEN 'Running'
                         WHEN ds.schedule_id IS NOT NULL AND ds.status = 'Interrupted' THEN 'Terminated'
-                        WHEN ds.status IN ('Completed', 'Interrupted') THEN 'Completed'
-                        ELSE ds.status
+                        WHEN ds.status = 'Completed' THEN 'Completed'
+                        WHEN ds.status = 'Interrupted' THEN 'Stopped'
+                        ELSE COALESCE(ds.status, 'Unknown')
                     END AS display_status
                  FROM drying_sessions ds
                  LEFT JOIN drying_logs dl ON dl.session_id=ds.session_id
@@ -862,11 +868,12 @@ switch ($action) {
                  LEFT JOIN tbl_prototypes p ON p.id = ds.proto_id
                  $whereClause
                  GROUP BY ds.session_id
-                 ORDER BY ds.start_time DESC"
-            );
+                 ORDER BY ds.start_time DESC";
+            
+            $stmt = $dbh->prepare($sql);
             $stmt->execute($params);
             sendResponse('success','Prototype sessions fetched.',$stmt->fetchAll(PDO::FETCH_ASSOC));
-        } catch(Exception $e){ sendResponse('error','Failed.'); }
+        } catch(Exception $e){ sendResponse('error','Failed: ' . $e->getMessage()); }
         break;
 
     // ============================================================

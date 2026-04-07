@@ -271,6 +271,8 @@ if (!isset($_SESSION['session_logged'])) {
   .pill-Completed{background:rgba(42,157,143,.10);color:#1E7A6E;border:1px solid rgba(42,157,143,.22);}
   .pill-Interrupted{background:rgba(193,68,14,.08);color:#9C3510;border:1px solid rgba(193,68,14,.2);}
   .pill-Terminated{background:rgba(220,38,38,.08);color:#B91C1C;border:1px solid rgba(220,38,38,.25);}
+  .pill-Stopped{background:rgba(244,162,97,.10);color:#B8751D;border:1px solid rgba(244,162,97,.25);}
+  .pill-Unknown{background:rgba(156,163,175,.10);color:#6B7280;border:1px solid rgba(156,163,175,.25);}
   .pill-Scheduled{background:rgba(124,92,191,.08);color:#6344A0;border:1px solid rgba(124,92,191,.2);}
   .pill-Done{background:rgba(82,182,154,.10);color:#2D7A62;border:1px solid rgba(82,182,154,.22);}
 
@@ -343,7 +345,7 @@ if (!isset($_SESSION['session_logged'])) {
   .act-view{background:rgba(42,157,143,.08);color:#1E7A6E;border:1px solid rgba(42,157,143,.2);}
   .act-del{background:rgba(193,68,14,.07);color:#9C3510;border:1px solid rgba(193,68,14,.16);}
 </style>
-<link rel="stylesheet" href="../assets/fishda-theme.css">
+<!-- <link rel="stylesheet" href="../assets/fishda-theme.css"> -->
 </head>
 <body class="theme-fishda theme-dashboard">
 <div id="toastZone"></div>
@@ -1025,6 +1027,13 @@ function updateSessionBadge(running){
   }
 }
 
+// Simple device status update (called by polling functions)
+function updateDeviceStatus(isOnline){
+  prototypeOnline = isOnline;
+  updateHeaderDeviceStatus(true, isOnline, null);
+  updateStartButtonState();
+}
+
 function formatTimeAgo(seconds) {
   if (seconds === null || seconds < 0) return '';
   
@@ -1543,6 +1552,9 @@ function updateSensorLabels(phase, isSession, temp, targetTemp) {
   const tempLabel = document.getElementById('tempLabel');
   const humLabel = document.getElementById('humLabel');
   
+  // Elements may not exist in current layout
+  if (!tempLabel || !humLabel) return;
+  
   if (!isSession) {
     tempLabel.textContent = 'Live Temp °C';
     humLabel.textContent = 'Live Humidity %';
@@ -1770,6 +1782,9 @@ async function submitSchedule(){
   const hum=document.getElementById('sched_hum').value;
   const duration=document.getElementById('sched_duration').value;
   const notes=document.getElementById('sched_notes').value;
+  
+  console.log('📅 Submitting schedule:', { title, date, time, temp, hum, duration, notes });
+  
   if(!date){ showToast('warning','Date Required','Please choose a schedule date.',3000); return; }
   const fd=new FormData();
   fd.append('action','create_schedule');
@@ -1781,14 +1796,36 @@ async function submitSchedule(){
   fd.append('duration_hours',duration);
   fd.append('notes',notes);
   try{
-    const j=await(await fetch('../api/schedule_api.php',{method:'POST',body:fd})).json();
+    console.log('📤 Sending request to schedule_api.php...');
+    const response = await fetch('../api/schedule_api.php',{method:'POST',body:fd});
+    console.log('📥 Response status:', response.status, response.statusText);
+    const responseText = await response.text();
+    console.log('📥 Raw response:', responseText);
+    
+    let j;
+    try {
+      j = JSON.parse(responseText);
+    } catch(parseErr) {
+      console.error('❌ JSON parse error:', parseErr);
+      console.error('❌ Response was:', responseText);
+      showToast('warning','Server Error','Invalid response from server.',3000);
+      return;
+    }
+    
+    console.log('📥 Parsed response:', j);
     if(j.status==='success'){
       closeScheduleModal();
       if(userCal) userCal.refetchEvents();
       loadUserSchedules();
       showToast('success','Added!','Your batch has been added to the calendar.',3000);
-    } else { showToast('warning','Error',j.message||'Failed.',3000); }
-  }catch(e){ showToast('warning','Network Error','Could not save schedule.',3000); }
+    } else { 
+      console.error('❌ API error:', j.message);
+      showToast('warning','Error',j.message||'Failed.',3000); 
+    }
+  }catch(e){ 
+    console.error('❌ Network/fetch error:', e);
+    showToast('warning','Network Error','Could not save schedule.',3000); 
+  }
 }
 
 async function deleteSchedule(id){
