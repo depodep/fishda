@@ -2057,9 +2057,11 @@ async function checkExistingSession(){
       updateDeviceStatus(isOnline);
 
       // Display idle sensor data (even if no active session)
-      if(isOnline && d.recorded_temp!==null && d.recorded_temp!==''){
+      // Show data even when offline/stale, as long as we have temperature readings
+      if(d.recorded_temp!==null && d.recorded_temp!==''){
         document.getElementById('liveTemp').textContent=parseFloat(d.recorded_temp).toFixed(1);
         document.getElementById('liveHum').textContent=parseFloat(d.recorded_humidity).toFixed(1);
+        // Update graph with current data (including during idle/cooldown/offline)
         updateMiniChart(parseFloat(d.recorded_temp), parseFloat(d.recorded_humidity));
       } else {
         document.getElementById('liveTemp').textContent='—';
