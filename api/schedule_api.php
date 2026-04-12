@@ -17,10 +17,29 @@ function resp($status, $message, $data = []) {
     exit;
 }
 
-if (!isset($_SESSION['user_id'])) resp('error', 'Unauthorized.');
+// Support both user-based and prototype-based auth
+$user_id = $_SESSION['user_id'] ?? null;
+$proto_id = $_SESSION['proto_id'] ?? null;
+
+// If no user_id but we have proto_id, get or create a default user for scheduling
+if (!$user_id && $proto_id) {
+    try {
+        // Use fishda_bot or first admin as fallback user for prototype schedules
+        $uid_row = $dbh->query("SELECT id FROM tblusers WHERE username='fishda_bot' AND status=1 LIMIT 1")
+                       ->fetch(PDO::FETCH_ASSOC)
+                    ?: $dbh->query("SELECT id FROM tblusers WHERE permission='admin' AND status=1 ORDER BY id ASC LIMIT 1")
+                       ->fetch(PDO::FETCH_ASSOC)
+                    ?: $dbh->query("SELECT id FROM tblusers WHERE status=1 ORDER BY id ASC LIMIT 1")
+                       ->fetch(PDO::FETCH_ASSOC);
+        if ($uid_row) {
+            $user_id = (int)$uid_row['id'];
+        }
+    } catch (Exception $e) {}
+}
+
+if (!$user_id && !$proto_id) resp('error', 'Unauthorized.');
 
 $action  = $_POST['action'] ?? $_GET['action'] ?? null;
-$user_id = $_SESSION['user_id'];
 $is_admin = ($_SESSION['permission'] ?? 'user') === 'admin';
 
 switch ($action) {
@@ -40,6 +59,11 @@ switch ($action) {
         if (!$sched_date) resp('error', 'Schedule date is required.');
 
         try {
+            // Ensure duration_hours column exists (migration)
+            try {
+                $dbh->exec("ALTER TABLE batch_schedules ADD COLUMN IF NOT EXISTS duration_hours DECIMAL(4,1) DEFAULT 2.0 AFTER set_humidity");
+            } catch (Exception $e) { /* column may already exist */ }
+            
             $stmt = $dbh->prepare(
                 "INSERT INTO batch_schedules
                     (user_id, title, sched_date, sched_time, set_temp, set_humidity, duration_hours, notes, status)
@@ -142,15 +166,6 @@ switch ($action) {
                  ORDER BY ds.start_time DESC
                  LIMIT 200"
             );
-                        COALESCE(p.model_name, 'Fishda') AS model_name,
-                        COALESCE(p.given_code, 'FD2026') AS unit_code
-                 FROM drying_sessions ds
-                 JOIN tblusers u ON u.id = ds.user_id
-                 LEFT JOIN tbl_prototypes p ON p.id = ds.proto_id
-                 $whereClause
-                 ORDER BY ds.start_time DESC
-                 LIMIT 200"
-            );
             $stmtS->execute($params);
             foreach ($stmtS->fetchAll(PDO::FETCH_ASSOC) as $row) {
                 $color = $row['status'] === 'Completed' ? '#10b981' : '#f97316';
@@ -175,10 +190,6 @@ switch ($action) {
                         'set_temp'     => $row['set_temp'],
                         'set_humidity' => $row['set_humidity'],
                         'status'       => $row['status'],
-                    ],
-                ];
-            }
-                        'end_time'     => $row['end_time'],
                     ],
                 ];
             }
