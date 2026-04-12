@@ -73,6 +73,7 @@ try {
 try {
     $sessStmt = $dbh->query(
         "SELECT ds.session_id, ds.set_temp, ds.set_humidity, ds.start_time, ds.schedule_id,
+                ds.notes,
                 bs.duration_hours,
                 TIMESTAMPDIFF(MINUTE, ds.start_time, NOW()) AS elapsed_minutes
          FROM drying_sessions ds
@@ -95,10 +96,29 @@ try {
     sendResponse('error', 'DB operation failed: ' . $e->getMessage());
 }
 
-// ── 2b. If session is running & scheduled, auto-stop when duration reached ──
-if ($activeSession && !empty($activeSession['schedule_id']) && $activeSession['duration_hours'] !== null) {
+// ── 2b. If session is running and has a configured duration, auto-stop when reached ──
+if ($activeSession) {
+    $effectiveDurationHours = null;
+
+    // 1) Scheduled session duration from batch_schedules
+    if ($activeSession['duration_hours'] !== null) {
+        $effectiveDurationHours = floatval($activeSession['duration_hours']);
+    }
+
+    // 2) Manual session duration from drying_sessions.notes JSON
+    if ($effectiveDurationHours === null && !empty($activeSession['notes'])) {
+        $decodedNotes = json_decode((string)$activeSession['notes'], true);
+        if (is_array($decodedNotes) && isset($decodedNotes['manual_duration_hours'])) {
+            $manualDuration = floatval($decodedNotes['manual_duration_hours']);
+            if ($manualDuration > 0) {
+                $effectiveDurationHours = $manualDuration;
+            }
+        }
+    }
+
+    if ($effectiveDurationHours !== null) {
     $elapsedMinutes  = (int)($activeSession['elapsed_minutes'] ?? 0);
-    $durationMinutes = (int)round(floatval($activeSession['duration_hours']) * 60);
+    $durationMinutes = (int)round($effectiveDurationHours * 60);
 
     if ($durationMinutes > 0 && $elapsedMinutes >= $durationMinutes) {
         try {
@@ -108,9 +128,11 @@ if ($activeSession && !empty($activeSession['schedule_id']) && $activeSession['d
             $stopStmt = $dbh->prepare("UPDATE drying_sessions SET status='Completed', end_time=NOW() WHERE session_id=:sid");
             $stopStmt->execute([':sid' => $session_id]);
 
-            // 2. Mark schedule as done
-            $schedUpd = $dbh->prepare("UPDATE batch_schedules SET status='Done', last_checked=NOW() WHERE id=:sid");
-            $schedUpd->execute([':sid' => $activeSession['schedule_id']]);
+            // 2. Mark schedule as done (scheduled sessions only)
+            if (!empty($activeSession['schedule_id'])) {
+                $schedUpd = $dbh->prepare("UPDATE batch_schedules SET status='Done', last_checked=NOW() WHERE id=:sid");
+                $schedUpd->execute([':sid' => $activeSession['schedule_id']]);
+            }
 
             // 3. Reset drying_controls to IDLE
             $ctrlUpd = $dbh->prepare("UPDATE drying_controls SET status='IDLE', cooldown_until=NULL WHERE id=1");
@@ -123,7 +145,7 @@ if ($activeSession && !empty($activeSession['schedule_id']) && $activeSession['d
         }
 
         // Tell device to stop — session finished by duration
-        sendResponse('success', '⏹ Scheduled duration reached — session auto-stopped.', [
+        sendResponse('success', '⏹ Session duration reached — session auto-stopped.', [
             'command'      => 'STOP',
             'heater'       => 0,
             'heater1'      => 0,
@@ -136,9 +158,10 @@ if ($activeSession && !empty($activeSession['schedule_id']) && $activeSession['d
             'session_id'   => $session_id,
             'target_temp'  => floatval($activeSession['set_temp']),
             'target_hum'   => floatval($activeSession['set_humidity']),
-            'duration_hours' => floatval($activeSession['duration_hours']),
+            'duration_hours' => $effectiveDurationHours,
             'auto_stopped' => true,
         ]);
+    }
     }
 }
 

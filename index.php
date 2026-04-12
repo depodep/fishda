@@ -132,6 +132,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'login
     --success:   #0f766e;
     --warning:   #b45309;
     --danger:    #dc2626;
+    --swal-bg:   #ffffff;
+    --swal-text: #102a2d;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin:0; padding:0; }
@@ -981,7 +983,7 @@ body {
 .f-hint {
     font-family: 'Space Mono', monospace;
     font-size: 0.58rem;
-    color: rgba(0,229,255,0.45);
+    color: var(--muted);
     margin-top: 5px;
     padding-left: 3px;
 }
@@ -999,10 +1001,10 @@ body {
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    background: #2A2A2A;
+    background: rgba(255,255,255,0.95);
     padding: 0 12px;
     font-size: 0.6rem;
-    color: rgba(255,255,255,0.4);
+    color: var(--muted);
     letter-spacing: 0.15em;
     font-family: 'Space Mono', monospace;
 }
@@ -1048,13 +1050,13 @@ body {
     text-align: center;
     margin-top: 14px;
     font-size: 0.75rem;
-    color: rgba(0,212,255,0.7);
+    color: var(--accent2);
     text-decoration: none;
     font-weight: 600;
     transition: color .2s;
 }
 .link-admin:hover {
-    color: #00b8d4;
+    color: var(--accent);
     text-decoration: underline;
 }
 
@@ -1065,17 +1067,17 @@ body {
     padding-top: 20px;
     border-top: 1px solid rgba(80,80,80,0.3);
     font-size: 0.65rem;
-    color: rgba(255,255,255,0.5);
+    color: var(--muted);
     font-family: 'Space Mono', monospace;
     line-height: 1.8;
 }
 .card-footer-note a {
-    color: rgba(0,212,255,0.65);
+    color: var(--accent2);
     text-decoration: none;
     transition: color .2s;
 }
 .card-footer-note a:hover { 
-    color: #00b8d4;
+    color: var(--accent);
 }
 
 /* Contact Info Below Card */
@@ -1240,10 +1242,7 @@ body {
                     <img src="assets/fishlogo.jpg" alt="Fish dryer prototype view" onerror="this.style.display='none';this.nextElementSibling.style.display='grid';">
                     <div class="hero-shot-fallback" style="display:none;">PROTOTYPE VIEW A</div>
                 </div>
-                <div class="hero-shot">
-                    <img src="assets/fishlogo.jpg" alt="Fish dryer prototype front" onerror="this.style.display='none';this.nextElementSibling.style.display='grid';">
-                    <div class="hero-shot-fallback" style="display:none;">PROTOTYPE VIEW B</div>
-                </div>
+          
             </div>
 
             <p class="home-copy">
@@ -1346,8 +1345,6 @@ body {
 
                 <hr class="f-divider">
 
-                <hr class="f-divider">
-
                 <button type="submit" class="btn-access">
                     <i class="fas fa-sign-in-alt" style="margin-right:8px;"></i>
                     Login to System
@@ -1388,6 +1385,12 @@ body {
 </div>
 
 <script>
+const appStyles = getComputedStyle(document.documentElement);
+const swalTheme = {
+    background: appStyles.getPropertyValue('--swal-bg').trim() || '#ffffff',
+    color: appStyles.getPropertyValue('--swal-text').trim() || '#102a2d'
+};
+
 document.querySelectorAll('.hero-link').forEach(btn => {
     btn.addEventListener('click', function () {
         document.querySelectorAll('.hero-link').forEach(b => b.classList.remove('active'));
@@ -1423,16 +1426,16 @@ if (inquiryForm) {
                         icon: 'success',
                         title: 'Inquiry Sent',
                         text: data.message || 'Your message has been sent.',
-                        background: '#080f1a',
-                        color: '#e8f4ff'
+                        background: swalTheme.background,
+                        color: swalTheme.color
                     });
                 } else {
                     Swal.fire({
                         icon: 'error',
                         title: 'Send Failed',
                         text: data.message || 'Could not send inquiry.',
-                        background: '#080f1a',
-                        color: '#e8f4ff'
+                        background: swalTheme.background,
+                        color: swalTheme.color
                     });
                 }
             })
@@ -1440,8 +1443,8 @@ if (inquiryForm) {
                 icon: 'error',
                 title: 'Network Error',
                 text: 'Could not send your inquiry right now.',
-                background: '#080f1a',
-                color: '#e8f4ff'
+                background: swalTheme.background,
+                color: swalTheme.color
             }));
     });
 }
@@ -1456,8 +1459,8 @@ document.getElementById('loginForm').addEventListener('submit', function(e) {
         title: 'Verifying Prototype...',
         html: '<span style="font-size:.82rem;color:#64748b;font-family:monospace">Checking model credentials</span>',
         allowOutsideClick: false,
-        background: '#080f1a',
-        color: '#e8f4ff',
+        background: swalTheme.background,
+        color: swalTheme.color,
         didOpen: () => Swal.showLoading()
     });
 
@@ -1483,16 +1486,16 @@ document.getElementById('loginForm').addEventListener('submit', function(e) {
                     text: data.message,
                     timer: 1800,
                     showConfirmButton: false,
-                    background: '#080f1a',
-                    color: '#e8f4ff'
+                    background: swalTheme.background,
+                    color: swalTheme.color
                 }).then(() => window.location.href = data.redirect);
             } else {
                 Swal.fire({
                     icon: 'error',
                     title: 'Access Denied',
                     text: data.message,
-                    background: '#080f1a',
-                    color: '#e8f4ff'
+                    background: swalTheme.background,
+                    color: swalTheme.color
                 });
             }
         })
@@ -1500,8 +1503,8 @@ document.getElementById('loginForm').addEventListener('submit', function(e) {
             icon: 'error',
             title: 'Network Error',
             text: 'Could not reach the server or received an invalid response.',
-            background: '#080f1a',
-            color: '#e8f4ff'
+            background: swalTheme.background,
+            color: swalTheme.color
         }));
 });
 </script>
