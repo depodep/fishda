@@ -73,6 +73,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 echo json_encode(['status'=>'success','message'=>'Session stopped.']);
             } catch(Exception $e){ echo json_encode(['status'=>'error','message'=>$e->getMessage()]); }
             exit;
+        case 'mark_inquiry_status':
+        $inqId = intval($_POST['inquiry_id'] ?? 0);
+        $newStatus = trim($_POST['status'] ?? 'read');
+        $allowed = ['pending', 'read', 'replied'];
+        if ($inqId <= 0 || !in_array($newStatus, $allowed, true)) {
+          echo json_encode(['status' => 'error', 'message' => 'Invalid inquiry update payload.']);
+          exit;
+        }
+        try {
+          $dbh->exec(
+            "CREATE TABLE IF NOT EXISTS tbl_inquiries (
+              id INT AUTO_INCREMENT PRIMARY KEY,
+              name VARCHAR(150) NOT NULL,
+              contact VARCHAR(100) NULL,
+              message TEXT NOT NULL,
+              status ENUM('pending','read','replied') NOT NULL DEFAULT 'pending',
+              created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+          );
+          $stmt = $dbh->prepare("UPDATE tbl_inquiries SET status=:st WHERE id=:id");
+          $stmt->execute([':st' => $newStatus, ':id' => $inqId]);
+          echo json_encode(['status' => 'success', 'message' => 'Inquiry status updated.']);
+        } catch (Exception $e) {
+          echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
+        }
+        exit;
     }
 }
 
@@ -210,6 +236,24 @@ if (isset($_GET['action'])) {
                 echo json_encode(['status'=>'success','data'=>$stmt->fetchAll(PDO::FETCH_ASSOC)]);
             } catch(PDOException $e){ echo json_encode(['status'=>'error','message'=>$e->getMessage()]); }
             break;
+        case 'get_inquiries':
+          try {
+            $dbh->exec(
+              "CREATE TABLE IF NOT EXISTS tbl_inquiries (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(150) NOT NULL,
+                contact VARCHAR(100) NULL,
+                message TEXT NOT NULL,
+                status ENUM('pending','read','replied') NOT NULL DEFAULT 'pending',
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+              ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            );
+            $stmt = $dbh->query("SELECT id, name, contact, message, status, created_at FROM tbl_inquiries ORDER BY created_at DESC");
+            echo json_encode(['status' => 'success', 'data' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
+          } catch (Exception $e) {
+            echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
+          }
+          break;
     }
     exit;
 }
@@ -222,7 +266,7 @@ if (isset($_GET['action'])) {
 <title>Smart Fish Drying | Admin Control Center</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Mulish:wght@300;400;500;600;700&family=Source+Code+Pro:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
 <link href='https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.css' rel='stylesheet'>
 <script src='https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.js'></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -236,53 +280,78 @@ if (isset($_GET['action'])) {
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
 :root{
   /* Sidebar */
-  --sidebar-bg:#1C2B1F;
-  --sidebar-active-bg:#243228;
+  --sidebar-bg:#123c42;
+  --sidebar-active-bg:#1a4f57;
   --sidebar-w:272px;
   /* Surfaces */
-  --main-bg:#F5F0E8;
-  --surface:#FEFCF8;
-  --surface-2:#F2EDE1;
+  --main-bg:#eff6f3;
+  --surface:#ffffff;
+  --surface-2:#ecf4f2;
   /* Brand palette — fish-drying warm tones */
-  --forest:#1C2B1F;
-  --forest-mid:#243228;
-  --teal:#2A9D8F;
-  --teal-light:#3BB5A5;
-  --golden:#E9A825;
-  --amber:#E76F30;
-  --terracotta:#C1440E;
-  --sand:#D4A96A;
-  --parchment:#EDD9A3;
-  --seafoam:#52B69A;
+  --forest:#123c42;
+  --forest-mid:#1a4f57;
+  --teal:#0f766e;
+  --teal-light:#155e75;
+  --golden:#b45309;
+  --amber:#c26b23;
+  --terracotta:#b91c1c;
+  --sand:#c18a52;
+  --parchment:#f5ede1;
+  --seafoam:#0d9488;
   /* Text */
-  --text-primary:#1A1208;
-  --text-secondary:#4A3728;
-  --text-muted:#8C7355;
-  --text-light:#B8A48A;
-  --text-on-dark:#EDE0C8;
-  --text-on-dark-muted:#8FAF95;
+  --text-primary:#102a2d;
+  --text-secondary:#2f5358;
+  --text-muted:#5f7a80;
+  --text-light:#8ba2a7;
+  --text-on-dark:#e7f6f4;
+  --text-on-dark-muted:#a7d1cb;
   /* Accents */
-  --success:#2A9D8F;
-  --danger:#C1440E;
-  --warn:#E9A825;
-  --violet:#7C5CBF;
+  --success:#0f766e;
+  --danger:#b91c1c;
+  --warn:#b45309;
+  --violet:#0e7490;
   /* Borders / Shadows */
-  --border:#DDD0B8;
-  --border-strong:#C4B090;
-  --shadow-sm:0 1px 4px rgba(28,18,8,.07);
-  --shadow-md:0 4px 16px rgba(28,18,8,.10);
-  --shadow-lg:0 8px 32px rgba(28,18,8,.14);
-  --shadow-xl:0 16px 56px rgba(28,18,8,.18);
+  --border:#cde1de;
+  --border-strong:#9ebdb9;
+  --shadow-sm:0 1px 4px rgba(16,42,45,.07);
+  --shadow-md:0 4px 16px rgba(16,42,45,.10);
+  --shadow-lg:0 8px 32px rgba(16,42,45,.14);
+  --shadow-xl:0 16px 56px rgba(16,42,45,.18);
   /* Glow */
-  --glow-teal:0 0 24px rgba(42,157,143,.28);
-  --glow-golden:0 0 24px rgba(233,168,37,.28);
-  --glow-amber:0 0 24px rgba(231,111,48,.28);
+  --glow-teal:0 0 24px rgba(15,118,110,.28);
+  --glow-golden:0 0 24px rgba(180,83,9,.28);
+  --glow-amber:0 0 24px rgba(185,28,28,.22);
 }
-body{font-family:'Mulish',sans-serif;background:var(--main-bg);color:var(--text-primary);min-height:100vh;overflow-x:hidden;}
+body{font-family:'Bricolage Grotesque',sans-serif;background:var(--main-bg);color:var(--text-primary);min-height:100vh;overflow-x:hidden;}
 /* Warm parchment texture overlay on body */
 body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='0.025'/%3E%3C/svg%3E");
-  opacity:.4;}
+  opacity:.32;}
+
+/* Theme/font harmonization with landing page */
+.brand-title,
+.page-title,
+.telemetry-value,
+.stat-value,
+.modal-title,
+.toast-title,
+.fc-toolbar-title,
+.user-avatar {
+  font-family:'Bricolage Grotesque',sans-serif !important;
+  letter-spacing:0;
+}
+
+.mono,
+.nav-clock,
+.filter-label,
+.card-title,
+.stat-label,
+.page-sub,
+.brand-sub,
+.admin-badge,
+.pill {
+  font-family:'JetBrains Mono',monospace !important;
+}
 
 /* ── SIDEBAR ─────────────────────────────── */
 .sidebar{
@@ -683,6 +752,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
   <a class="nav-item" id="link-calendar" onclick="showTab('calendar')"><i class="fas fa-calendar-days"></i>Calendar</a>
   <div class="nav-section">Records</div>
   <a class="nav-item" id="link-records" onclick="showTab('records')"><i class="fas fa-database"></i>Drying Records</a>
+  <a class="nav-item" id="link-inquiries" onclick="showTab('inquiries')"><i class="fas fa-envelope-open-text"></i>Inquiries</a>
   <div class="sidebar-footer">
     <div class="user-card">
       <div class="d-flex align-items-center gap-2 mb-2">
@@ -988,6 +1058,29 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
       </div>
     </div>
 
+    <!-- ══════════════════════════ INQUIRIES ══════════════════════════ -->
+    <div id="tab-inquiries" class="tab-section">
+      <div class="d-flex align-items-center justify-content-between mb-4">
+        <div>
+          <div class="page-title">✉️ Contact Inquiries</div>
+          <div class="page-sub">Messages sent from the landing page "Get Touch With Us" form.</div>
+        </div>
+        <button class="btn-primary" style="padding:8px 14px;font-size:11px;" onclick="loadInquiries()"><i class="fas fa-rotate me-1"></i>Refresh</button>
+      </div>
+      <div class="glass-card">
+        <div class="section-scroll" style="padding:16px">
+          <table class="data-table">
+            <thead><tr>
+              <th>#</th><th>Name</th><th>Contact</th><th>Message</th><th>Status</th><th>Sent</th><th>Action</th>
+            </tr></thead>
+            <tbody id="inquiriesBody">
+              <tr><td colspan="7" style="text-align:center;padding:32px;color:var(--text-muted)"><i class="fas fa-spinner fa-spin me-2"></i>Loading inquiries…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
   </div><!-- /content-wrap -->
 </div><!-- /main -->
 
@@ -1074,6 +1167,7 @@ function showTab(tab){
   if(tab==='users'){ loadAllPrototypes(); }
   if(tab==='calendar'){ initAdminCalendar(); }
   if(tab==='records'){ loadRecords(); }
+  if(tab==='inquiries'){ loadInquiries(); }
 }
 
 function toggleFab(){ fabOpen=!fabOpen; document.getElementById('fabMenu').classList.toggle('open',fabOpen); }
@@ -1501,6 +1595,71 @@ async function loadRecords(){
 }
 
 // ════════════════════════════════════════════════════════
+//  INQUIRIES
+// ════════════════════════════════════════════════════════
+async function loadInquiries(){
+  const body = document.getElementById('inquiriesBody');
+  if(!body) return;
+  body.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--text-muted)"><i class="fas fa-spinner fa-spin me-2"></i>Loading inquiries…</td></tr>`;
+  try {
+    const r = await fetch('admin_sessions.php?action=get_inquiries');
+    const j = await r.json();
+    if (j.status !== 'success') {
+      body.innerHTML = noDataRow(7);
+      return;
+    }
+
+    const rows = j.data || [];
+    if (!rows.length) {
+      body.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:48px;color:var(--text-muted)">
+        <div style="font-size:28px;margin-bottom:10px"><i class="fas fa-envelope-open-text"></i></div>
+        <div style="font-size:13px;font-weight:700;color:var(--text-primary)">No inquiries yet</div>
+        <div style="font-size:11.5px;margin-top:4px">Landing page messages will appear here.</div>
+      </td></tr>`;
+      return;
+    }
+
+    body.innerHTML = rows.map(row => `
+      <tr>
+        <td class="mono" style="color:var(--teal)">#${row.id}</td>
+        <td style="font-weight:700">${escapeHtml(row.name || '—')}</td>
+        <td style="font-size:11px;color:var(--text-muted)">${escapeHtml(row.contact || '—')}</td>
+        <td style="max-width:360px;white-space:normal;line-height:1.5;">${escapeHtml(row.message || '—')}</td>
+        <td><span class="pill pill-${row.status === 'pending' ? 'Running' : 'Completed'}">${escapeHtml(row.status || 'pending')}</span></td>
+        <td style="font-size:11px;color:var(--text-muted)">${escapeHtml((row.created_at || '').slice(0,16).replace('T',' ') || '—')}</td>
+        <td>
+          <div class="d-flex gap-1 flex-wrap">
+            <button onclick="markInquiryStatus(${row.id},'read')" class="act-btn act-view">Mark Read</button>
+            <button onclick="markInquiryStatus(${row.id},'replied')" class="act-btn act-edit">Mark Replied</button>
+          </div>
+        </td>
+      </tr>
+    `).join('');
+  } catch (e) {
+    body.innerHTML = noDataRow(7);
+  }
+}
+
+async function markInquiryStatus(inquiryId, status){
+  const fd = new FormData();
+  fd.append('action', 'mark_inquiry_status');
+  fd.append('inquiry_id', inquiryId);
+  fd.append('status', status);
+
+  try {
+    const j = await (await fetch('admin_sessions.php', { method: 'POST', body: fd })).json();
+    if (j.status === 'success') {
+      showToast('success', 'Inquiry Updated', j.message || 'Status updated.', 2000);
+      loadInquiries();
+    } else {
+      showToast('warning', 'Update Failed', j.message || 'Could not update inquiry.', 3000);
+    }
+  } catch (e) {
+    showToast('warning', 'Network Error', 'Could not update inquiry status.', 3000);
+  }
+}
+
+// ════════════════════════════════════════════════════════
 //  TOAST
 // ════════════════════════════════════════════════════════
 function showToast(type,title,msg,dur=4000){
@@ -1517,6 +1676,14 @@ function showToast(type,title,msg,dur=4000){
 // ════════════════════════════════════════════════════════
 function noDataRow(cols){
   return `<tr><td colspan="${cols}" style="text-align:center;padding:32px;color:var(--text-muted);font-size:12px;">No data found.</td></tr>`;
+}
+function escapeHtml(value){
+  return String(value)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;')
+    .replace(/'/g,'&#39;');
 }
 function logoutAdmin(){
   Swal.fire({title:'Logout?',icon:'question',showCancelButton:true,confirmButtonColor:'#E63946',background:'#fff',color:'#0D1B2A'})

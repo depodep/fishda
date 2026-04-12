@@ -12,6 +12,48 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 include('database/dbcon.php');
 
+// ─── INQUIRY HANDLER ─────────────
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'send_inquiry') {
+    header('Content-Type: application/json');
+
+    $name    = trim($_POST['inq_name'] ?? '');
+    $contact = trim($_POST['inq_contact'] ?? '');
+    $message = trim($_POST['inq_message'] ?? '');
+
+    if ($name === '' || $message === '') {
+        echo json_encode(['status' => 'error', 'message' => 'Name and message are required.']);
+        exit;
+    }
+
+    try {
+        $dbh->exec(
+            "CREATE TABLE IF NOT EXISTS tbl_inquiries (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(150) NOT NULL,
+                contact VARCHAR(100) NULL,
+                message TEXT NOT NULL,
+                status ENUM('pending','read','replied') NOT NULL DEFAULT 'pending',
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+        );
+
+        $stmt = $dbh->prepare(
+            "INSERT INTO tbl_inquiries (name, contact, message, status)
+             VALUES (:name, :contact, :message, 'pending')"
+        );
+        $stmt->execute([
+            ':name' => $name,
+            ':contact' => ($contact !== '' ? $contact : null),
+            ':message' => $message,
+        ]);
+
+        echo json_encode(['status' => 'success', 'message' => 'Your inquiry has been sent.']);
+    } catch (Exception $e) {
+        echo json_encode(['status' => 'error', 'message' => 'Failed to send inquiry. Please try again.']);
+    }
+    exit;
+}
+
 // ─── LOGIN HANDLER ───────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'login') {
     header('Content-Type: application/json');
@@ -74,28 +116,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'login
 <title>Automated Prototype System</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <style>
 :root {
-    --bg:        #1A1A1A;
-    --panel:     rgba(42,42,42,0.95);
-    --accent:    #00838F;
-    --accent2:   #00838F;
-    --gold:      #ffb800;
-    --border:    rgba(80,80,80,0.5);
-    --muted:     rgba(255,255,255,0.55);
-    --txt:       #ffffff;
-    --text-dim:  rgba(255,255,255,0.75);
-    --success:   #00838F;
-    --warning:   #ffb800;
-    --danger:    #ff4757;
+    --bg:        #eff6f3;
+    --panel:     rgba(255,255,255,0.84);
+    --accent:    #0f766e;
+    --accent2:   #155e75;
+    --gold:      #b45309;
+    --border:    rgba(15,118,110,0.22);
+    --muted:     #6b7f86;
+    --txt:       #102a2d;
+    --text-dim:  #3f5f66;
+    --success:   #0f766e;
+    --warning:   #b45309;
+    --danger:    #dc2626;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin:0; padding:0; }
 
 body {
-    font-family: 'Syne', sans-serif;
+    font-family: 'Bricolage Grotesque', sans-serif;
     min-height: 100vh;
     background: var(--bg);
     display: flex;
@@ -110,17 +152,17 @@ body {
 .bg-layer {
     position: fixed; inset: 0; z-index: 0;
     background:
-        radial-gradient(ellipse 70% 50% at 30% 40%, rgba(0,131,143,0.15) 0%, transparent 60%),
-        radial-gradient(ellipse 60% 70% at 70% 60%, rgba(0,184,212,0.10) 0%, transparent 55%),
-        linear-gradient(160deg, #0a0f1a 0%, #0d1420 50%, #080d16 100%);
+    radial-gradient(ellipse 70% 50% at 20% 35%, rgba(15,118,110,0.12) 0%, transparent 62%),
+    radial-gradient(ellipse 65% 60% at 78% 70%, rgba(180,83,9,0.10) 0%, transparent 58%),
+    linear-gradient(155deg, #f7fbf9 0%, #e7f1ee 52%, #f9f6ef 100%);
 }
 
 /* Grid lines */
 .bg-grid {
     position: fixed; inset: 0; z-index: 1; pointer-events: none;
     background-image:
-        linear-gradient(rgba(0,131,143,0.06) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(0,131,143,0.06) 1px, transparent 1px);
+        linear-gradient(rgba(21,94,117,0.08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(21,94,117,0.08) 1px, transparent 1px);
     background-size: 60px 60px;
     animation: gridDrift 25s linear infinite;
     opacity: 0.7;
@@ -140,7 +182,7 @@ body {
     height: 350px; 
     top: -5%; 
     left: 5%; 
-    background: rgba(0,131,143,0.12); 
+    background: rgba(15,118,110,0.16); 
     animation-delay: 0s; 
 }
 .orb-2 { 
@@ -148,7 +190,7 @@ body {
     height: 280px; 
     bottom: 5%; 
     right: 10%; 
-    background: rgba(0,184,212,0.10); 
+    background: rgba(180,83,9,0.13); 
     animation-delay: -7s; 
 }
 @keyframes orbFloat {
@@ -161,13 +203,330 @@ body {
     position: relative; 
     z-index: 10;
     width: 100%;
-    max-width: 480px;
+    max-width: 1160px;
     margin: 0 auto;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(360px, 420px);
+    gap: 28px;
+    align-items: start;
 }
 
-/* Hide left sidebar - compact design */
+/* Left content */
 .info-side {
+    display: block;
+    background: rgba(42,42,42,0.92);
+    border: 1px solid rgba(0,131,143,0.22);
+    border-radius: 18px;
+    padding: 26px;
+    box-shadow: 0 8px 28px rgba(0,0,0,0.28);
+}
+
+.hero-nav {
+    display: flex;
+    gap: 12px;
+    margin-top: 14px;
+    margin-bottom: 16px;
+}
+
+.hero-link {
+    border: 1px solid rgba(0,184,212,0.3);
+    background: rgba(0,184,212,0.08);
+    color: #a9f4ff;
+    border-radius: 999px;
+    padding: 7px 14px;
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    font-weight: 700;
+    text-transform: uppercase;
+    cursor: pointer;
+}
+
+.hero-link.active {
+    background: linear-gradient(135deg, #00838F 0%, #00b8d4 100%);
+    color: #fff;
+    border-color: transparent;
+}
+
+.hero-panel {
     display: none;
+}
+
+.hero-panel.active {
+    display: block;
+}
+
+.hero-gallery {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+.hero-shot {
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid rgba(0,184,212,0.22);
+    background: rgba(0,0,0,0.18);
+    min-height: 140px;
+}
+
+.hero-shot img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.hero-shot-fallback {
+    width: 100%;
+    height: 100%;
+    min-height: 140px;
+    display: grid;
+    place-items: center;
+    color: rgba(255,255,255,0.75);
+    font-family: 'Space Mono', monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    background: linear-gradient(160deg, rgba(0,131,143,0.28), rgba(0,0,0,0.15));
+}
+
+.home-copy {
+    color: rgba(255,255,255,0.86);
+    line-height: 1.6;
+    font-size: 1rem;
+}
+
+.contact-card {
+    border: 1px solid rgba(0,184,212,0.24);
+    border-radius: 12px;
+    padding: 16px;
+    background: rgba(0,184,212,0.04);
+}
+
+.contact-card h3 {
+    color: #c9f7ff;
+    margin: 0 0 6px;
+    font-size: 1.05rem;
+}
+
+.contact-card p {
+    color: rgba(255,255,255,0.7);
+    font-size: 0.82rem;
+    margin-bottom: 12px;
+}
+
+.contact-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.contact-field {
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(0,184,212,0.26);
+    background: rgba(0,184,212,0.06);
+    color: #fff;
+    font-size: 0.84rem;
+    outline: none;
+}
+
+.contact-field::placeholder {
+    color: rgba(255,255,255,0.45);
+}
+
+.contact-field:focus {
+    border-color: #00b8d4;
+    box-shadow: 0 0 0 3px rgba(0,184,212,0.14);
+}
+
+.contact-message {
+    margin-top: 10px;
+    min-height: 110px;
+    resize: vertical;
+}
+
+.contact-submit {
+    margin-top: 10px;
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    background: linear-gradient(135deg, #00838F 0%, #00b8d4 100%);
+    color: #fff;
+    cursor: pointer;
+}
+
+.contact-direct {
+    margin-top: 12px;
+    font-size: 0.76rem;
+    color: rgba(255,255,255,0.72);
+    line-height: 1.65;
+}
+
+/* ── THEME REFRESH OVERRIDES ── */
+.info-side {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    box-shadow: 0 14px 34px rgba(16,42,45,0.12);
+}
+
+.hero-link {
+    border-color: rgba(21,94,117,0.24);
+    background: rgba(15,118,110,0.08);
+    color: var(--accent2);
+}
+
+.hero-link.active {
+    background: linear-gradient(135deg, #0f766e 0%, #155e75 100%);
+}
+
+.hero-shot {
+    border-color: rgba(21,94,117,0.18);
+    background: rgba(15,118,110,0.06);
+}
+
+.hero-shot-fallback {
+    color: var(--text-dim);
+    font-family: 'JetBrains Mono', monospace;
+    background: linear-gradient(160deg, rgba(15,118,110,0.18), rgba(255,255,255,0.44));
+}
+
+.home-copy,
+.sys-desc,
+.sys-caption,
+.card-footer-note,
+.contact-direct,
+.contact-item-bottom {
+    color: var(--text-dim);
+}
+
+.sys-badge-top,
+.sys-badge,
+.sys-sub,
+.f-hint,
+.card-corner,
+.contact-item-bottom,
+.contact-direct,
+.f-input {
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.system-title,
+.sys-title,
+.login-head h2 {
+    color: var(--txt);
+}
+
+.system-title span,
+.sys-title span,
+.link-admin,
+.login-head p,
+.f-label {
+    color: var(--accent2);
+}
+
+.sys-badge-top {
+    background: rgba(15,118,110,0.10);
+    border-color: rgba(15,118,110,0.24);
+    color: var(--accent2);
+}
+
+.sys-badge-top .pulse-dot {
+    background: #16a34a;
+    box-shadow: 0 0 8px rgba(22,163,74,0.5);
+}
+
+.contact-card,
+.login-card,
+.contact-info-bottom {
+    background: rgba(255,255,255,0.86);
+    border-color: var(--border);
+}
+
+.contact-card h3,
+.contact-card p,
+.contact-title,
+.contact-item-bottom,
+.f-label,
+.f-icon,
+.feature-pill {
+    color: var(--txt);
+}
+
+.feature-pill {
+    background: rgba(15,118,110,0.07);
+    border-color: rgba(15,118,110,0.20);
+}
+
+.feature-pill i,
+.f-icon,
+.contact-item-bottom i,
+.contact-title i {
+    color: var(--accent);
+}
+
+.login-card {
+    box-shadow: 0 16px 36px rgba(16,42,45,0.16), 0 0 0 1px rgba(15,118,110,0.10);
+}
+
+.login-card::before {
+    background: linear-gradient(90deg, transparent, #0f766e, #155e75, #0f766e, transparent);
+}
+
+.card-corner,
+.f-hint,
+.f-divider::before,
+.card-footer-note a {
+    color: var(--muted);
+}
+
+.f-divider {
+    border-top-color: rgba(63,95,102,0.24);
+}
+
+.f-divider::before {
+    background: rgba(255,255,255,0.95);
+}
+
+.f-input,
+.contact-field {
+    background: #ffffff;
+    border-color: rgba(21,94,117,0.26);
+    color: var(--txt);
+}
+
+.f-input::placeholder,
+.contact-field::placeholder {
+    color: #88a0a7;
+}
+
+.f-input:focus,
+.contact-field:focus {
+    border-color: var(--accent2);
+    box-shadow: 0 0 0 3px rgba(21,94,117,0.14);
+}
+
+.btn-access,
+.contact-submit {
+    background: linear-gradient(135deg, #0f766e 0%, #155e75 100%);
+    font-family: 'Bricolage Grotesque', sans-serif;
+}
+
+.btn-access:hover,
+.contact-submit:hover {
+    background: linear-gradient(135deg, #0e8b80 0%, #1b6f87 100%);
+}
+
+.link-admin:hover,
+.card-footer-note a:hover {
+    color: var(--accent);
 }
 
 /* System Header Badge */
@@ -797,6 +1156,17 @@ body {
 @media (max-width: 500px) {
     .page-wrap { 
         max-width: 100%; 
+        display: block;
+    }
+    .info-side {
+        margin-bottom: 16px;
+        padding: 18px;
+    }
+    .hero-gallery {
+        grid-template-columns: 1fr;
+    }
+    .contact-grid {
+        grid-template-columns: 1fr;
     }
     .login-card {
         padding: 30px 22px;
@@ -855,38 +1225,53 @@ body {
                 <span class="dot"></span>
                 SYSTEM ONLINE
             </div>
-            <h1 class="sys-title">Automated <span>Prototype</span> System</h1>
+            <h1 class="sys-title">Automated <span>Fish Dryer</span></h1>
             <div class="sys-sub">IoT MONITORING & CONTROL PLATFORM</div>
+
+            <div class="hero-nav">
+                <button type="button" class="hero-link active" data-target="homePanel">Home</button>
+                <button type="button" class="hero-link" data-target="contactPanel">Contact Us</button>
+            </div>
         </div>
 
-        <div class="main-content">
-            <p class="sys-desc">
-                Centralized platform for real-time monitoring, control, and data logging of registered IoT prototypes. Each unit identified by model name and access code.
-            </p>
-
-            <div class="feature-grid">
-                <div class="feature-chip">
-                    <i class="fas fa-microchip"></i>
-                    <span>Real-Time Automation</span>
+        <div class="main-content hero-panel active" id="homePanel">
+            <div class="hero-gallery">
+                <div class="hero-shot">
+                    <img src="assets/fishlogo.jpg" alt="Fish dryer prototype view" onerror="this.style.display='none';this.nextElementSibling.style.display='grid';">
+                    <div class="hero-shot-fallback" style="display:none;">PROTOTYPE VIEW A</div>
                 </div>
-                <div class="feature-chip">
-                    <i class="fas fa-shield-halved"></i>
-                    <span>Secure Access</span>
-                </div>
-                <div class="feature-chip">
-                    <i class="fas fa-chart-line"></i>
-                    <span>Data Logging</span>
+                <div class="hero-shot">
+                    <img src="assets/fishlogo.jpg" alt="Fish dryer prototype front" onerror="this.style.display='none';this.nextElementSibling.style.display='grid';">
+                    <div class="hero-shot-fallback" style="display:none;">PROTOTYPE VIEW B</div>
                 </div>
             </div>
 
-            <div class="contact-inline">
-                <div class="contact-item">
-                    <i class="fas fa-phone"></i>
-                    <span>+63 912 345 6789</span>
-                </div>
-                <div class="contact-item">
-                    <i class="fas fa-envelope"></i>
-                    <span>admin@protoautosys.edu.ph</span>
+            <p class="home-copy">
+                Welcome to the Automated Fish Dryer Prototype Management System, a centralized platform for real-time monitoring,
+                control, and data logging of registered IoT prototypes. Each unit is uniquely identified by model name and access code,
+                allowing seamless and secure session access.
+            </p>
+        </div>
+
+        <div class="main-content hero-panel" id="contactPanel">
+            <div class="contact-card">
+                <h3>Get Touch With Us</h3>
+                <p>Interested in our automated fish dryer? Send us your inquiry.</p>
+
+                <form id="inquiryForm" autocomplete="off">
+                    <input type="hidden" name="action" value="send_inquiry">
+                    <div class="contact-grid">
+                        <input type="text" name="inq_name" class="contact-field" placeholder="Name" required>
+                        <input type="text" name="inq_contact" class="contact-field" placeholder="Email or Phone">
+                    </div>
+                    <textarea name="inq_message" class="contact-field contact-message" placeholder="Messages" required></textarea>
+                    <button type="submit" class="contact-submit"><i class="fas fa-paper-plane"></i>Order Now</button>
+                </form>
+
+                <div class="contact-direct">
+                    Phone: <strong>+63 9977856704</strong><br>
+                    Email: <strong>fd_admin@gmail.com</strong><br>
+                    Support Hours: Monday - Friday | 8:00 AM - 5:00 PM
                 </div>
             </div>
         </div>
@@ -1003,6 +1388,64 @@ body {
 </div>
 
 <script>
+document.querySelectorAll('.hero-link').forEach(btn => {
+    btn.addEventListener('click', function () {
+        document.querySelectorAll('.hero-link').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.hero-panel').forEach(panel => panel.classList.remove('active'));
+        this.classList.add('active');
+        const target = document.getElementById(this.getAttribute('data-target'));
+        if (target) target.classList.add('active');
+    });
+});
+
+const inquiryForm = document.getElementById('inquiryForm');
+if (inquiryForm) {
+    inquiryForm.addEventListener('submit', function (e) {
+        e.preventDefault();
+        fetch(window.location.pathname, {
+            method: 'POST',
+            body: new FormData(this),
+            credentials: 'same-origin',
+            headers: { 'Accept': 'application/json' }
+        })
+            .then(async r => {
+                const raw = await r.text();
+                try {
+                    return JSON.parse(raw);
+                } catch (_) {
+                    throw new Error('Invalid inquiry response');
+                }
+            })
+            .then(data => {
+                if (data.status === 'success') {
+                    this.reset();
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'Inquiry Sent',
+                        text: data.message || 'Your message has been sent.',
+                        background: '#080f1a',
+                        color: '#e8f4ff'
+                    });
+                } else {
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Send Failed',
+                        text: data.message || 'Could not send inquiry.',
+                        background: '#080f1a',
+                        color: '#e8f4ff'
+                    });
+                }
+            })
+            .catch(() => Swal.fire({
+                icon: 'error',
+                title: 'Network Error',
+                text: 'Could not send your inquiry right now.',
+                background: '#080f1a',
+                color: '#e8f4ff'
+            }));
+    });
+}
+
 document.getElementById('loginForm').addEventListener('submit', function(e) {
     e.preventDefault();
 

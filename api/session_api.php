@@ -139,7 +139,14 @@ switch ($action) {
     case 'start_session':
         $set_temp = max(30, min(70, floatval($_POST['set_temp'] ?? 45)));
         $set_hum  = max(10, min(80, floatval($_POST['set_humidity'] ?? 25)));
+        $duration_hours = floatval($_POST['duration_hours'] ?? 0);
+        if ($duration_hours > 0) {
+            $duration_hours = max(0.5, min(24, $duration_hours));
+        } else {
+            $duration_hours = 0;
+        }
         $schedule_id = intval($_POST['schedule_id'] ?? 0) ?: null; // Track if session is from a schedule
+        $session_notes = $duration_hours > 0 ? json_encode(['manual_duration_hours' => $duration_hours]) : null;
 
         // Get Fishda Bot user_id for automated sessions
         $uid_row = $dbh->query("SELECT id FROM tblusers WHERE username='fishda_bot' AND status=1 LIMIT 1")
@@ -183,8 +190,8 @@ switch ($action) {
             $proto_row = $dbh->query("SELECT id FROM tbl_prototypes WHERE status = 1 LIMIT 1")->fetch();
             $proto_id = $proto_row ? $proto_row['id'] : 1;
             
-            $stmt = $dbh->prepare("INSERT INTO drying_sessions (user_id,proto_id,schedule_id,set_temp,set_humidity,status,start_time) VALUES(:uid,:pid,:sid,:t,:h,'Running',NOW())");
-            $stmt->execute([':uid'=>$default_user_id,':pid'=>$proto_id,':sid'=>$schedule_id,':t'=>$set_temp,':h'=>$set_hum]);
+            $stmt = $dbh->prepare("INSERT INTO drying_sessions (user_id,proto_id,schedule_id,set_temp,set_humidity,status,start_time,notes) VALUES(:uid,:pid,:sid,:t,:h,'Running',NOW(),:notes)");
+            $stmt->execute([':uid'=>$default_user_id,':pid'=>$proto_id,':sid'=>$schedule_id,':t'=>$set_temp,':h'=>$set_hum,':notes'=>$session_notes]);
             $session_id = $dbh->lastInsertId();
             // Sync drying_controls — clear any leftover cooldown
             $dbh->prepare("UPDATE drying_controls SET target_temp=:t,target_humidity=:h,status='RUNNING',start_time=NOW(),cooldown_until=NULL WHERE id=1")
@@ -193,6 +200,7 @@ switch ($action) {
                 'session_id'   => (int)$session_id,
                 'set_temp'     => $set_temp,
                 'set_humidity' => $set_hum,
+                'duration_hours' => $duration_hours > 0 ? $duration_hours : null,
                 'status'       => 'Running'
             ]);
         } catch(Exception $e){ sendResponse('error','Failed to start: '.$e->getMessage()); }
@@ -478,8 +486,11 @@ switch ($action) {
             // No user_id resolution needed
             if ($proto_id > 0) {
                 $session = $dbh->query(
-                    "SELECT ds.session_id, ds.set_temp, ds.set_humidity, ds.start_time, ds.user_id
+                    "SELECT ds.session_id, ds.set_temp, ds.set_humidity, ds.start_time, ds.user_id,
+                            ds.schedule_id, ds.notes,
+                            bs.title AS schedule_title, bs.sched_date, bs.sched_time, bs.duration_hours, bs.auto_started
                      FROM drying_sessions ds
+                     LEFT JOIN batch_schedules bs ON bs.id = ds.schedule_id
                      WHERE ds.status = 'Running'
                      ORDER BY ds.start_time DESC LIMIT 1"
                 )->fetch(PDO::FETCH_ASSOC);
@@ -597,6 +608,14 @@ switch ($action) {
             }
 
             $sid = $session['session_id'];
+            $manualDurationHours = null;
+            if (!empty($session['notes'])) {
+                $decoded = json_decode((string)$session['notes'], true);
+                if (is_array($decoded) && isset($decoded['manual_duration_hours'])) {
+                    $manualDurationHours = floatval($decoded['manual_duration_hours']);
+                }
+            }
+            $sessionDurationHours = $session['duration_hours'] ? floatval($session['duration_hours']) : $manualDurationHours;
 
             // ── Fetch controls row for cooldown state and cycle count ──
             $ctrl_query = "SELECT status AS ctrl_status, cooldown_until";
@@ -652,7 +671,7 @@ switch ($action) {
                     'schedule_title'     => $session['schedule_title'] ?? null,
                     'schedule_date'      => $session['sched_date'] ?? null,
                     'schedule_time'      => $session['sched_time'] ?? null,
-                    'duration_hours'     => $session['duration_hours'] ? floatval($session['duration_hours']) : null,
+                    'duration_hours'     => $sessionDurationHours,
                     'auto_started'       => $session['auto_started'] ? (int)$session['auto_started'] : 0,
                 ]);
             }
@@ -677,7 +696,7 @@ switch ($action) {
             $log['schedule_title']     = $session['schedule_title'] ?? null;
             $log['schedule_date']      = $session['sched_date'] ?? null;
             $log['schedule_time']      = $session['sched_time'] ?? null;
-            $log['duration_hours']     = $session['duration_hours'] ? floatval($session['duration_hours']) : null;
+            $log['duration_hours']     = $sessionDurationHours;
             $log['auto_started']       = $session['auto_started'] ? (int)$session['auto_started'] : 0;
 
             // Fish-ready check

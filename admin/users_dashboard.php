@@ -518,8 +518,15 @@ if (!isset($_SESSION['session_logged'])) {
               </div>
               <input type="range" id="humRange" min="10" max="80" value="30" class="hum-range" oninput="document.getElementById('humVal').textContent=this.value+'%'">
             </div>
+            <div class="range-group">
+              <div class="range-label">
+                <span class="range-name"><i class="fas fa-hourglass-half me-2" style="color:var(--golden)"></i>Run Duration</span>
+                <span class="range-val" id="durationVal" style="color:var(--golden);font-size:20px;">2.0h</span>
+              </div>
+              <input type="number" id="durationHours" min="0.5" max="24" step="0.5" value="2" class="form-input" style="font-size:12px;" oninput="document.getElementById('durationVal').textContent=(parseFloat(this.value||0)||0).toFixed(1)+'h'">
+            </div>
             <div id="controlSection">
-              <button class="btn-start" id="startBtn" onclick="startSession()"><i class="fas fa-play me-2"></i>Start Drying Session</button>
+              <button class="btn-start" id="startBtn" onclick="startSession()"><i class="fas fa-robot me-2"></i>Start Auto Session</button>
             </div>
           </div>
         </div>
@@ -797,6 +804,9 @@ let currentSetTemp=50, currentSetHum=30;
 let liveLabels=[], liveTemps=[], liveHums=[];
 let notifList=[], timerInterval=null, protoStatusTimer=null;
 let prototypeOnline=false; // Track device online status
+let autoStartAttempted=false;
+let sessionDurationHours=null;
+let autoDurationStopTriggered=false;
 
 // Clock
 setInterval(()=>{
@@ -819,7 +829,7 @@ function showTab(tab){
 // ════════════════════════════════════════════════════════
 //  SESSION CONTROL
 // ════════════════════════════════════════════════════════
-async function startSession(){
+async function startSession(isAutoStart=false){
   // Check if device is online before starting
   if(!prototypeOnline){
     Swal.fire({
@@ -836,35 +846,70 @@ async function startSession(){
 
   const temp=document.getElementById('tempRange').value;
   const hum=document.getElementById('humRange').value;
-  const r=await Swal.fire({
-    title:'Start Drying Session?',
-    html:`<div style="text-align:center;padding:8px 0;">
-      <div style="font-size:14px;color:#4A6FA5;margin-bottom:6px;">Target: <b>${temp}°C</b> / <b>${hum}%</b> Humidity</div>
-      <div style="font-size:12px;color:#8BA7C4;">Fan will turn ON as heat source.</div>
-    </div>`,
-    icon:'question',showCancelButton:true,confirmButtonColor:'#2A9D8F',
-    confirmButtonText:'Start',background:'#fff',color:'#0D1B2A'
-  });
-  if(!r.isConfirmed) return;
+  const durationRaw=parseFloat(document.getElementById('durationHours')?.value || '2');
+  const durationHours=Math.min(24, Math.max(0.5, isNaN(durationRaw) ? 2 : durationRaw));
+
+  if(!isAutoStart){
+    const r=await Swal.fire({
+      title:'Start Auto Session?',
+      html:`<div style="text-align:center;padding:8px 0;">
+        <div style="font-size:14px;color:#4A6FA5;margin-bottom:6px;">Target: <b>${temp}°C</b> / <b>${hum}%</b> Humidity</div>
+        <div style="font-size:12px;color:#8BA7C4;">Duration: <b>${durationHours.toFixed(1)} hour(s)</b></div>
+      </div>`,
+      icon:'question',showCancelButton:true,confirmButtonColor:'#2A9D8F',
+      confirmButtonText:'Start',background:'#fff',color:'#0D1B2A'
+    });
+    if(!r.isConfirmed) return;
+  }
+
   try{
     const fd=new FormData();
     fd.append('action','start_session');
     fd.append('set_temp',temp);
     fd.append('set_humidity',hum);
+    fd.append('duration_hours', durationHours.toString());
     const j=await(await fetch('../api/session_api.php',{method:'POST',body:fd})).json();
     if(j.status==='success'){
       sessionRunning=true;
       sessionId=(j.data&&j.data.session_id)?j.data.session_id:null;
       currentSetTemp=parseFloat(temp)||50;
       currentSetHum=parseFloat(hum)||30;
+      sessionDurationHours = durationHours;
+      autoDurationStopTriggered = false;
       startTimeEpoch=Date.now();
       updateControlUI(true,temp,hum);
       updateSessionBadge(true);
       startTimer();
-      showToast('success','Session Started!',`Fan (heat source) ON — targeting ${temp}°C / ${hum}%`,4000);
+      showToast('success','Session Started!',`Auto run for ${durationHours.toFixed(1)}h at ${temp}°C / ${hum}%`,4000);
       pollLiveData();
     } else { showToast('warning','Error',j.message||'Could not start.',4000); }
   }catch(e){ showToast('warning','Network Error','Could not reach server.',3000); }
+}
+
+async function autoStopByDuration(){
+  if(!sessionRunning || autoDurationStopTriggered) return;
+  autoDurationStopTriggered = true;
+
+  try {
+    const fd = new FormData();
+    fd.append('action', 'emergency_stop');
+    const response = await fetch('../api/controls_api.php', { method: 'POST', body: fd });
+    const j = await response.json();
+    if (j.status === 'success') {
+      sessionRunning = false;
+      sessionId = null;
+      sessionDurationHours = null;
+      clearInterval(timerInterval);
+      updateControlUI(false);
+      updateSessionBadge(false);
+      hideBanners();
+      showToast('success', 'Session Completed', 'Duration reached. Session stopped automatically.', 4500);
+    } else {
+      autoDurationStopTriggered = false;
+    }
+  } catch (e) {
+    autoDurationStopTriggered = false;
+  }
 }
 
 async function stopSession(){
@@ -981,7 +1026,7 @@ function updateControlUI(running,temp,hum){
     document.getElementById('phaseBadge').innerHTML='<i class="fas fa-fan me-1"></i>Heating';
     
     // Show stop button when session is running
-    if(stopBtn) stopBtn.style.display='inline-block';
+    if(stopBtn) stopBtn.style.display='none';
     
     // Show session timer when active
     if(sessionTimer) sessionTimer.style.display='block';
@@ -1137,7 +1182,7 @@ function updateStartButtonState(){
     startBtn.disabled = false;
     startBtn.style.opacity = '1';
     startBtn.style.cursor = 'pointer';
-    startBtn.innerHTML = '<i class="fas fa-play me-2"></i>Start Drying Session';
+    startBtn.innerHTML = '<i class="fas fa-robot me-2"></i>Start Auto Session';
   }
 }
 
@@ -1146,6 +1191,20 @@ function startTimer(){
   timerInterval=setInterval(()=>{
     if(!startTimeEpoch) return;
     const elapsed=Date.now()-startTimeEpoch;
+    if(sessionDurationHours && sessionDurationHours > 0){
+      const limitMs = sessionDurationHours * 3600000;
+      if(elapsed >= limitMs){
+        document.getElementById('elapsedTime').textContent='00:00:00 left';
+        autoStopByDuration();
+        return;
+      }
+      const remaining = limitMs - elapsed;
+      const h=Math.floor(remaining/3600000).toString().padStart(2,'0');
+      const m=Math.floor((remaining%3600000)/60000).toString().padStart(2,'0');
+      const s=Math.floor((remaining%60000)/1000).toString().padStart(2,'0');
+      document.getElementById('elapsedTime').textContent=`${h}:${m}:${s} left`;
+      return;
+    }
     const h=Math.floor(elapsed/3600000).toString().padStart(2,'0');
     const m=Math.floor((elapsed%3600000)/60000).toString().padStart(2,'0');
     const s=Math.floor((elapsed%60000)/1000).toString().padStart(2,'0');
@@ -1227,7 +1286,7 @@ function updateDryingProgressDisplay(data) {
   
   if (sessionRunning) {
     sessionTimer.style.display = 'block';
-    stopBtn.style.display = 'inline-block';
+    stopBtn.style.display = 'none';
     
     // Update timer label and display based on session type
     if (data.is_scheduled && data.duration_hours) {
@@ -2077,13 +2136,15 @@ async function checkExistingSession(){
         currentSetTemp=parseFloat(d.set_temp)||50;
         currentSetHum=parseFloat(d.set_humidity)||30;
         if(d.start_time) startTimeEpoch=new Date(d.start_time.replace(' ','T')).getTime();
+        sessionDurationHours = d.duration_hours ? parseFloat(d.duration_hours) : null;
+        autoDurationStopTriggered = false;
 
         updateControlUI(true,d.set_temp,d.set_humidity);
         updateSessionBadge(true);
 
         // Show stop button
         const stopBtn = document.getElementById('stopBtn');
-        if(stopBtn) stopBtn.style.display = 'inline-block';
+        if(stopBtn) stopBtn.style.display = 'none';
 
         // Show session timer
         const sessionTimer = document.getElementById('sessionTimer');
@@ -2104,6 +2165,11 @@ async function checkExistingSession(){
         // Hide stop button
         const stopBtn = document.getElementById('stopBtn');
         if(stopBtn) stopBtn.style.display = 'none';
+
+        if (isOnline && !autoStartAttempted) {
+          autoStartAttempted = true;
+          setTimeout(() => startSession(true), 400);
+        }
       }
     } else if(j.status==='error'){
       // Handle API errors properly - ensure UI shows "not running"
@@ -2124,6 +2190,7 @@ async function checkExistingSession(){
     sessionRunning=false;
     sessionId=null;
     startTimeEpoch=null;
+    sessionDurationHours = null;
     updateControlUI(false);
     updateSessionBadge(false);
 
