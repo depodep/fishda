@@ -272,6 +272,12 @@ body {
     min-height: 140px;
 }
 
+.hero-gallery .hero-shot {
+    grid-column: 1 / -1;
+    width: min(100%, 520px);
+    margin: 0 auto;
+}
+
 .hero-shot img {
     width: 100%;
     height: 100%;
@@ -1242,7 +1248,6 @@ body {
                     <img src="assets/fishlogo.jpg" alt="Fish dryer prototype view" onerror="this.style.display='none';this.nextElementSibling.style.display='grid';">
                     <div class="hero-shot-fallback" style="display:none;">PROTOTYPE VIEW A</div>
                 </div>
-          
             </div>
 
             <p class="home-copy">
