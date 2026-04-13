@@ -3,11 +3,17 @@ ob_start();
 header('Content-Type: application/json');
 include '../database/dbcon.php';
 
-$table_name = 'drying_records'; 
-
 try {
-    // Strictly the 5 columns from your DB
-    $sql = "SELECT id, timestamp, batch_id, duration, energy, status FROM drying_records ORDER BY timestamp DESC";
+    $sql = "SELECT
+                ds.session_id AS id,
+                COALESCE(ds.end_time, ds.start_time) AS timestamp,
+                ds.proto_id AS batch_id,
+                TIMEDIFF(COALESCE(ds.end_time, NOW()), ds.start_time) AS duration,
+                0 AS energy,
+                ds.status
+            FROM drying_sessions ds
+            WHERE ds.status <> 'Running'
+            ORDER BY COALESCE(ds.end_time, ds.start_time) DESC";
     
     $stmt = $dbh->prepare($sql);
     $stmt->execute();

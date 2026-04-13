@@ -31,6 +31,20 @@ function sendResponse($status, $message, $data = []) {
 $temp     = floatval($_POST['temp']     ?? $_GET['temp']     ?? 0);
 $humidity = floatval($_POST['humidity'] ?? $_GET['humidity'] ?? 0);
 
+$proto_id = intval($_POST['proto_id'] ?? $_GET['proto_id'] ?? 0);
+$model_unit = trim($_POST['model_unit'] ?? $_GET['model_unit'] ?? '');
+$model_code = trim($_POST['model_code'] ?? $_GET['model_code'] ?? $_POST['model_unit_code'] ?? $_GET['model_unit_code'] ?? '');
+if ($proto_id <= 0 && $model_unit !== '' && $model_code !== '') {
+    try {
+        $p = $dbh->prepare("SELECT id FROM tbl_prototypes WHERE model_name=:m AND given_code=:c LIMIT 1");
+        $p->execute([':m' => $model_unit, ':c' => $model_code]);
+        $prow = $p->fetch(PDO::FETCH_ASSOC);
+        if ($prow && isset($prow['id'])) {
+            $proto_id = (int)$prow['id'];
+        }
+    } catch (Exception $e) {}
+}
+
 if ($temp <= 0 || $humidity <= 0) {
     sendResponse('error', 'Invalid sensor values.');
 }
@@ -38,7 +52,12 @@ if ($temp <= 0 || $humidity <= 0) {
 // ── 1. Update live cache FIRST (for instant display) ─────────
 try {
     // Update prototype heartbeat — keeps device marked as ONLINE
-    $dbh->query("UPDATE tbl_prototypes SET updated_at=NOW() WHERE id=1");
+    if ($proto_id > 0) {
+        $hb = $dbh->prepare("UPDATE tbl_prototypes SET updated_at=NOW() WHERE id=:pid");
+        $hb->execute([':pid' => $proto_id]);
+    } else {
+        $dbh->query("UPDATE tbl_prototypes SET updated_at=NOW() WHERE id=1");
+    }
 
     // Always update the live cache — this is what dashboard displays
     // Use provided state values or default to 0 (OFF)
@@ -71,16 +90,30 @@ try {
 
 // ── 2. Check for active session ───────────────────────────────
 try {
-    $sessStmt = $dbh->query(
-        "SELECT ds.session_id, ds.set_temp, ds.set_humidity, ds.start_time, ds.schedule_id,
+    if ($proto_id > 0) {
+        $sessStmt = $dbh->prepare(
+            "SELECT ds.session_id, ds.proto_id, ds.set_temp, ds.set_humidity, ds.start_time, ds.schedule_id,
                 ds.notes,
                 bs.duration_hours,
                 TIMESTAMPDIFF(MINUTE, ds.start_time, NOW()) AS elapsed_minutes
          FROM drying_sessions ds
          LEFT JOIN batch_schedules bs ON ds.schedule_id = bs.id
-         WHERE ds.status='Running'
+         WHERE ds.status='Running' AND ds.proto_id=:pid
          ORDER BY ds.start_time DESC LIMIT 1"
-    );
+        );
+        $sessStmt->execute([':pid' => $proto_id]);
+    } else {
+        $sessStmt = $dbh->query(
+            "SELECT ds.session_id, ds.proto_id, ds.set_temp, ds.set_humidity, ds.start_time, ds.schedule_id,
+                    ds.notes,
+                    bs.duration_hours,
+                    TIMESTAMPDIFF(MINUTE, ds.start_time, NOW()) AS elapsed_minutes
+             FROM drying_sessions ds
+             LEFT JOIN batch_schedules bs ON ds.schedule_id = bs.id
+             WHERE ds.status='Running'
+             ORDER BY ds.start_time DESC LIMIT 1"
+        );
+    }
     $activeSession = $sessStmt->fetch(PDO::FETCH_ASSOC);
     $session_id    = $activeSession ? (int)$activeSession['session_id'] : null;
 
@@ -169,15 +202,17 @@ if ($activeSession) {
 if (!$activeSession) {
     // Check if there's a scheduled batch that should start now
     try {
-        $schedCheck = $dbh->query("
+        $schedCheck = $dbh->prepare(" 
             SELECT id, user_id, title, sched_date, sched_time, 
-                   set_temp, set_humidity, duration_hours, notes
+                   set_temp, set_humidity, duration_hours, notes, proto_id
             FROM batch_schedules
             WHERE status = 'Scheduled'
+            AND (:pid <= 0 OR proto_id = :pid OR proto_id IS NULL)
             AND CONCAT(sched_date, ' ', sched_time) <= NOW()
             ORDER BY CONCAT(sched_date, ' ', sched_time) ASC
             LIMIT 1
         ");
+        $schedCheck->execute([':pid' => $proto_id]);
         $pendingSchedule = $schedCheck->fetch(PDO::FETCH_ASSOC);
         
         if ($pendingSchedule) {
@@ -186,11 +221,14 @@ if (!$activeSession) {
             
             // 1. Create new drying session
             $sessionStmt = $dbh->prepare("
-                INSERT INTO drying_sessions (user_id, set_temp, set_humidity, status, start_time, schedule_id, notes)
-                VALUES (:uid, :temp, :hum, 'Running', NOW(), :sched_id, :notes)
+                INSERT INTO drying_sessions (user_id, proto_id, set_temp, set_humidity, status, start_time, schedule_id, notes)
+                VALUES (:uid, :pid, :temp, :hum, 'Running', NOW(), :sched_id, :notes)
             ");
             $sessionStmt->execute([
                 ':uid' => $pendingSchedule['user_id'],
+                ':pid' => (($pendingSchedule['proto_id'] ?? null) !== null)
+                    ? intval($pendingSchedule['proto_id'])
+                    : ($proto_id > 0 ? $proto_id : null),
                 ':temp' => $pendingSchedule['set_temp'],
                 ':hum' => $pendingSchedule['set_humidity'],
                 ':sched_id' => $pendingSchedule['id'],
@@ -503,40 +541,9 @@ sendResponse('success', '✅ Device online (heartbeat received) - Reading proces
 // ── Helper: save summary record when session ends or target hit ─
 function _saveRecord($dbh, $sid, $reason) {
     try {
-        $sess = $dbh->prepare(
-            "SELECT ds.user_id, u.username,
-                TIMEDIFF(COALESCE(ds.end_time,NOW()), ds.start_time) AS duration,
-                ROUND(AVG(dl.recorded_temp),2)     AS avg_temp,
-                ROUND(AVG(dl.recorded_humidity),2) AS avg_hum
-             FROM drying_sessions ds
-             JOIN tblusers u ON u.id = ds.user_id
-             LEFT JOIN drying_logs dl ON dl.session_id = ds.session_id
-             WHERE ds.session_id = :sid
-             GROUP BY ds.session_id"
-        );
-        $sess->execute([':sid' => $sid]);
-        $s = $sess->fetch(PDO::FETCH_ASSOC);
-        if ($s) {
-            if ($reason === 'TargetReached') {
-                $rec_status = 'Completed & Dried';
-            } elseif ($reason === 'AutoStopped') {
-                $rec_status = 'AutoStopped';
-            } else {
-                $rec_status = 'Completed';
-            }
-            $dbh->prepare(
-                "INSERT INTO drying_records (batch_id, duration, energy, temp_avg, hum_avg, status, user_id, session_id)
-                 VALUES (:b, :d, 0, :t, :h, :st, :uid, :sid)"
-            )->execute([
-                ':b'   => $s['username'],
-                ':d'   => $s['duration'] ?? '00:00:00',
-                ':t'   => $s['avg_temp'] ?? 0,
-                ':h'   => $s['avg_hum']  ?? 0,
-                ':st'  => $rec_status,
-                ':uid' => $s['user_id'],
-                ':sid' => $sid,
-            ]);
-        }
+        // Summary records are now derived directly from drying_sessions + drying_logs.
+        // Keep this hook as a no-op for compatibility with existing call sites.
+        return;
     } catch (Exception $e) { /* non-fatal */ }
 }
 ?>

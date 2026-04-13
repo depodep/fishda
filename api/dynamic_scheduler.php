@@ -105,11 +105,12 @@ function startScheduledSession($dbh, $schedule) {
         
         // 2. Create new session
         $sessionStmt = $dbh->prepare("
-            INSERT INTO drying_sessions (user_id, set_temp, set_humidity, status, start_time, schedule_id)
-            VALUES (:uid, :temp, :hum, 'Running', NOW(), :sched_id)
+            INSERT INTO drying_sessions (user_id, proto_id, set_temp, set_humidity, status, start_time, schedule_id)
+            VALUES (:uid, :pid, :temp, :hum, 'Running', NOW(), :sched_id)
         ");
         $sessionStmt->execute([
             ':uid' => $schedule['user_id'],
+            ':pid' => $schedule['proto_id'] ?? null,
             ':temp' => $schedule['set_temp'],
             ':hum' => $schedule['set_humidity'],
             ':sched_id' => $schedule['id']

@@ -10,7 +10,7 @@
 #include <ArduinoJson.h>         
 
 // ── PIN DEFINITIONS ───────────────────────────────────────
-#define DHTPIN      D2   // DHT11 data pin
+#define DHTPIN      D4  // DHT11 data pin
 #define DHTTYPE     DHT11
 
 #define HEATER_PIN  D5   
@@ -19,8 +19,8 @@
 
 // ── ACCESS POINT CONFIGURATION ────────────────────────────
 // ESP will create WiFi network with these credentials
-const char* ap_ssid     = "FishDrying-AP";      // WiFi name
-const char* ap_password = "fishda2026";         // WiFi password (min 8 chars)
+const char* ap_ssid     = "Fingerprintscans";      // WiFi name
+const char* ap_password = "fingerpassword";         // WiFi password (min 8 chars)
 
 // Static IP configuration for ESP (this will be the server IP)
 IPAddress local_IP(192, 168, 4, 1);       // ESP IP address
@@ -126,12 +126,11 @@ void loop() {
       return;
     }
 
-    if (pollSessionStatus()) {
-      sendSensorData(temperature, humidity);
-    } else {
-      Serial.println("⏸  No active session. Waiting for user to start...");
-      allRelaysOff();
+    if (!pollSessionStatus()) {
+      Serial.println("⏸  No active session. Sending heartbeat for scheduled auto-start...");
     }
+    // Always send sensor payload so backend can auto-start due schedules and keep heartbeat alive.
+    sendSensorData(temperature, humidity);
   }
 }
 
@@ -199,18 +198,13 @@ bool readSensorData(float &temperature, float &humidity) {
 }
 
 void sendSensorData(float temperature, float humidity) {
-  if (currentSessionId <= 0) {
-    Serial.println("⏸  No session_id available for logging.");
-    return;
-  }
-
   HTTPClient http;
   http.begin(wifiClient, logReadingURL);
   http.addHeader("Content-Type", "application/x-www-form-urlencoded");
   http.setTimeout(8000);
 
   String postData = "action=log_reading";
-  postData += "&session_id=" + String(currentSessionId);
+  postData += "&session_id=" + String(currentSessionId > 0 ? currentSessionId : 0);
   postData += "&temp=" + String(temperature, 2);
   postData += "&humidity=" + String(humidity, 2);
   postData += "&access_code=" + urlEncode(espAccessCode);

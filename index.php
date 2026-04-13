@@ -274,7 +274,7 @@ body {
 
 .hero-gallery .hero-shot {
     grid-column: 1 / -1;
-    width: min(100%, 520px);
+    width: 100%;
     margin: 0 auto;
 }
 
@@ -380,6 +380,7 @@ body {
 
 /* ── THEME REFRESH OVERRIDES ── */
 .info-side {
+    margin-top: 90px;
     background: var(--panel);
     border: 1px solid var(--border);
     box-shadow: 0 14px 34px rgba(16,42,45,0.12);
@@ -484,6 +485,45 @@ body {
     box-shadow: 0 16px 36px rgba(16,42,45,0.16), 0 0 0 1px rgba(15,118,110,0.10);
 }
 
+/* Login card text contrast */
+.login-card .card-corner {
+    color: rgba(0,229,255,0.6);
+}
+
+.login-card .login-head h2,
+.login-card .f-label,
+.login-card .card-footer-note {
+    color: rgba(255,255,255,0.92);
+}
+
+.login-card .login-head p,
+.login-card .link-admin,
+.login-card .card-footer-note a {
+    color: #58eaff;
+}
+
+.login-card .sys-caption,
+.login-card .f-hint {
+    color: rgba(255,255,255,0.68);
+}
+
+.login-card .feature-pill {
+    color: rgba(255,255,255,0.88);
+}
+
+.login-card .feature-pill i,
+.login-card .f-icon {
+    color: #58eaff;
+}
+
+.login-card .f-input {
+    color: #ffffff;
+}
+
+.login-card .f-input::placeholder {
+    color: rgba(255,255,255,0.5);
+}
+
 .login-card::before {
     background: linear-gradient(90deg, transparent, #0f766e, #155e75, #0f766e, transparent);
 }
@@ -572,12 +612,12 @@ body {
 .system-title {
     font-size: 1.1rem;
     font-weight: 700;
-    color: rgba(255,255,255,0.9);
+    color: var(--txt);
     letter-spacing: 0.05em;
     margin: 0;
 }
 .system-title span {
-    color: #00b8d4;
+    color: var(--accent2);
     font-weight: 800;
 }
 
@@ -1245,7 +1285,7 @@ body {
         <div class="main-content hero-panel active" id="homePanel">
             <div class="hero-gallery">
                 <div class="hero-shot">
-                    <img src="assets/fishlogo.jpg" alt="Fish dryer prototype view" onerror="this.style.display='none';this.nextElementSibling.style.display='grid';">
+                    <img src="3d.jpg" alt="Fish dryer prototype view" onerror="this.style.display='none';this.nextElementSibling.style.display='grid';">
                     <div class="hero-shot-fallback" style="display:none;">PROTOTYPE VIEW A</div>
                 </div>
             </div>

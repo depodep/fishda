@@ -11,6 +11,7 @@ ini_set('display_errors', 0);
 error_reporting(0);
 if (ob_get_level()) ob_clean();
 header('Content-Type: application/json');
+date_default_timezone_set('Asia/Manila');
 
 require_once '../database/dbcon.php';
 
@@ -115,6 +116,84 @@ function resolveSessionUserIdFromPrototype($dbh, $proto_id) {
     return 0;
 }
 
+function recordOfflineScheduledStartFailure($dbh, $proto_id = 0) {
+    try {
+        $dbh->beginTransaction();
+
+        $dueSched = $dbh->prepare(
+            "SELECT id, user_id, proto_id, title, sched_date, sched_time, set_temp, set_humidity, duration_hours
+             FROM batch_schedules
+             WHERE status='Scheduled'
+               AND CONCAT(sched_date, ' ', sched_time) <= NOW()
+               AND (:pid <= 0 OR proto_id = :pid OR proto_id IS NULL)
+             ORDER BY CONCAT(sched_date, ' ', sched_time) ASC
+             LIMIT 1
+             FOR UPDATE"
+        );
+        $dueSched->execute([':pid' => (int)$proto_id]);
+        $sched = $dueSched->fetch(PDO::FETCH_ASSOC);
+
+        if (!$sched) {
+            $dbh->rollBack();
+            return null;
+        }
+
+        $stamp = date('Y-m-d H:i:s');
+        $failureNote = '[FAILED_TO_START] Device offline at scheduled start. Recorded at ' . $stamp;
+
+        $updSched = $dbh->prepare(
+            "UPDATE batch_schedules
+             SET status='Done',
+                 notes=TRIM(CONCAT(COALESCE(notes,''), CASE WHEN COALESCE(notes,'')='' THEN '' ELSE '\\n' END, :failure_note))
+             WHERE id=:id AND status='Scheduled'"
+        );
+        $updSched->execute([
+            ':id' => (int)$sched['id'],
+            ':failure_note' => $failureNote,
+        ]);
+
+        if ($updSched->rowCount() < 1) {
+            $dbh->rollBack();
+            return null;
+        }
+
+        $insFailed = $dbh->prepare(
+            "INSERT INTO drying_sessions
+             (user_id, proto_id, schedule_id, set_temp, set_humidity, status, start_time, end_time, notes)
+             VALUES
+             (:uid, :pid, :sched_id, :temp, :hum, 'Completed', TIMESTAMP(:sched_date, :sched_time), NOW(), :notes)"
+        );
+        $insFailed->execute([
+            ':uid' => (int)$sched['user_id'],
+            ':pid' => (($sched['proto_id'] ?? null) !== null)
+                ? (int)$sched['proto_id']
+                : ((int)$proto_id > 0 ? (int)$proto_id : null),
+            ':sched_id' => (int)$sched['id'],
+            ':temp' => (float)$sched['set_temp'],
+            ':hum' => (float)$sched['set_humidity'],
+            ':sched_date' => $sched['sched_date'],
+            ':sched_time' => $sched['sched_time'],
+            ':notes' => 'FailedToStart | ' . $failureNote,
+        ]);
+
+        $failedSessionId = (int)$dbh->lastInsertId();
+        $dbh->commit();
+
+        return [
+            'recorded' => true,
+            'schedule_id' => (int)$sched['id'],
+            'session_id' => $failedSessionId,
+            'schedule_title' => (string)$sched['title'],
+            'scheduled_start' => (string)$sched['sched_date'] . ' ' . (string)$sched['sched_time'],
+        ];
+    } catch (Exception $e) {
+        if ($dbh->inTransaction()) {
+            $dbh->rollBack();
+        }
+        return null;
+    }
+}
+
 $proto_id = intval($_SESSION['proto_id'] ?? $_GET['proto_id'] ?? $_POST['proto_id'] ?? 0);
 $session_user_id = intval($_SESSION['user_id'] ?? 0);
 $is_admin = isset($_SESSION['user_id']) && (($_SESSION['permission'] ?? 'user') === 'admin');
@@ -123,8 +202,12 @@ if (!in_array($action, $esp_actions) && !isset($_SESSION['user_id']) && $proto_i
     sendResponse('error', 'Unauthorized. Please login.');
 }
 
+$espProto = null;
 if (in_array($action, $esp_actions)) {
-    validateEspRequest($dbh);
+    $espProto = validateEspRequest($dbh);
+    if ($proto_id <= 0 && is_array($espProto) && isset($espProto['id'])) {
+        $proto_id = (int)$espProto['id'];
+    }
 }
 
 $user_id = $is_admin
@@ -139,9 +222,10 @@ switch ($action) {
     case 'start_session':
         $set_temp = max(30, min(70, floatval($_POST['set_temp'] ?? 45)));
         $set_hum  = max(10, min(80, floatval($_POST['set_humidity'] ?? 25)));
+        $min_duration_hours = (1 / 60); // 1 minute
         $duration_hours = floatval($_POST['duration_hours'] ?? 0);
         if ($duration_hours > 0) {
-            $duration_hours = max(0.5, min(24, $duration_hours));
+            $duration_hours = max($min_duration_hours, min(24, $duration_hours));
         } else {
             $duration_hours = 0;
         }
@@ -216,41 +300,15 @@ switch ($action) {
         try {
             $where  = $is_admin ? "WHERE session_id=:sid AND status='Running'" : "WHERE session_id=:sid AND user_id=:uid AND status='Running'";
             $params = $is_admin ? [':sid'=>$session_id] : [':sid'=>$session_id,':uid'=>$user_id];
-            $dbh->prepare("UPDATE drying_sessions SET status='Completed',end_time=NOW() $where")->execute($params);
+            $finalStatus = ($save_reason === 'AutoDuration') ? 'Completed' : 'Interrupted';
+            $stmt = $dbh->prepare("UPDATE drying_sessions SET status=:st,end_time=NOW() $where");
+            $stmt->execute(array_merge([':st' => $finalStatus], $params));
             $dbh->query("UPDATE drying_controls SET status='STOPPED',start_time=NULL,cooldown_until=NULL WHERE id=1");
 
-            // Auto-save drying record
-            $sess = $dbh->prepare(
-                "SELECT ds.user_id, u.username, ds.set_temp, ds.set_humidity,
-                    TIMEDIFF(COALESCE(ds.end_time,NOW()),ds.start_time) AS duration,
-                    ROUND(AVG(dl.recorded_temp),2)     AS avg_temp,
-                    ROUND(AVG(dl.recorded_humidity),2) AS avg_hum,
-                    COUNT(dl.log_id)                   AS total_logs
-                 FROM drying_sessions ds
-                 JOIN tblusers u ON u.id=ds.user_id
-                 LEFT JOIN drying_logs dl ON dl.session_id=ds.session_id
-                 WHERE ds.session_id=:sid
-                 GROUP BY ds.session_id"
-            );
-            $sess->execute([':sid'=>$session_id]);
-            $s = $sess->fetch(PDO::FETCH_ASSOC);
-
-            if ($s) {
-                $rec_status = ($save_reason === 'TargetReached') ? 'Completed & Dried' : 'Completed';
-                $dbh->prepare(
-                    "INSERT INTO drying_records (batch_id, duration, energy, temp_avg, hum_avg, status, user_id, session_id)
-                     VALUES (:b, :d, 0, :t, :h, :st, :uid, :sid)"
-                )->execute([
-                    ':b'   => $s['username'],
-                    ':d'   => $s['duration'] ?? '00:00:00',
-                    ':t'   => $s['avg_temp'] ?? 0,
-                    ':h'   => $s['avg_hum']  ?? 0,
-                    ':st'  => $rec_status,
-                    ':uid' => $s['user_id'],
-                    ':sid' => $session_id,
-                ]);
-            }
-            sendResponse('success','Prototype session completed and saved.',['save_reason'=>$save_reason]);
+            $msg = ($finalStatus === 'Interrupted')
+                ? 'Prototype session terminated and saved.'
+                : 'Prototype session completed and saved.';
+            sendResponse('success',$msg,['save_reason'=>$save_reason,'final_status'=>$finalStatus]);
         } catch(Exception $e){ sendResponse('error','Stop failed: '.$e->getMessage()); }
         break;
 
@@ -259,15 +317,51 @@ switch ($action) {
     //  UPDATED: FAN = heat source (ON during Heating + Drying)
     // ============================================================
     case 'log_reading':
-        // Validate scheduled sessions before processing log
-        // validateScheduledSessions($dbh); // Disabled: schedule now handled in sensor_api.php
+        // Validate scheduled sessions before processing log so due batches can start here.
+        validateScheduledSessions($dbh);
 
         $session_id        = intval($_POST['session_id'] ?? 0);
         $recorded_temp     = floatval($_POST['temp'] ?? 0);
         $recorded_humidity = floatval($_POST['humidity'] ?? 0);
 
+        // Keep live sensor cache fresh for dashboard idle/live readings.
+        $upsertLiveCache = function($phase, $fan1, $fan2) use ($dbh, $recorded_temp, $recorded_humidity) {
+            try {
+                $dbh->prepare(
+                    "INSERT INTO live_sensor_cache
+                     (id, temperature, humidity, fan1_state, fan2_state, heater1_state, heater2_state, exhaust_state, phase, timestamp)
+                     VALUES (1, :temp, :hum, :f1, :f2, 0, 0, 0, :phase, NOW())
+                     ON DUPLICATE KEY UPDATE
+                        temperature=:temp_u,
+                        humidity=:hum_u,
+                        fan1_state=:f1_u,
+                        fan2_state=:f2_u,
+                        heater1_state=0,
+                        heater2_state=0,
+                        exhaust_state=0,
+                        phase=:phase_u,
+                        timestamp=NOW()"
+                )->execute([
+                    ':temp' => $recorded_temp,
+                    ':hum' => $recorded_humidity,
+                    ':f1' => (int)$fan1,
+                    ':f2' => (int)$fan2,
+                    ':phase' => $phase,
+                    ':temp_u' => $recorded_temp,
+                    ':hum_u' => $recorded_humidity,
+                    ':f1_u' => (int)$fan1,
+                    ':f2_u' => (int)$fan2,
+                    ':phase_u' => $phase,
+                ]);
+            } catch (Exception $e) {
+                // Non-fatal: do not interrupt ESP control loop.
+            }
+        };
+
         // If session_id=0, this is idle state - just cache the sensor data
         if ($session_id <= 0) {
+            $upsertLiveCache('Idle', 0, 0);
+
             // Log idle reading to drying_logs for live display
             try {
                 $dbh->prepare(
@@ -283,6 +377,21 @@ switch ($action) {
                 'phase'     => 'Idle',
                 'session_id' => 0
             ]);
+        }
+
+        if ($session_id <= 0 && $proto_id > 0) {
+            $runningStmt = $dbh->prepare(
+                "SELECT session_id
+                 FROM drying_sessions
+                 WHERE status='Running' AND proto_id=:pid
+                 ORDER BY start_time DESC
+                 LIMIT 1"
+            );
+            $runningStmt->execute([':pid' => $proto_id]);
+            $runningSession = $runningStmt->fetch(PDO::FETCH_ASSOC);
+            if ($runningSession && !empty($runningSession['session_id'])) {
+                $session_id = (int)$runningSession['session_id'];
+            }
         }
 
         $sessStmt = $dbh->prepare("SELECT set_temp,set_humidity FROM drying_sessions WHERE session_id=:sid AND status='Running' LIMIT 1");
@@ -428,6 +537,8 @@ switch ($action) {
             ]);
         }
 
+        $upsertLiveCache($phase, $fan1_state, $fan2_state);
+
         // Fish ready check
         $recentLogs = $dbh->prepare("SELECT recorded_temp, recorded_humidity FROM drying_logs WHERE session_id=:sid ORDER BY timestamp DESC LIMIT 5");
         $recentLogs->execute([':sid'=>$session_id]);
@@ -468,9 +579,13 @@ switch ($action) {
                 $stmt = $dbh->prepare("SELECT session_id, status, set_temp, set_humidity FROM drying_sessions WHERE session_id=:sid LIMIT 1");
                 $stmt->execute([':sid'=>$session_id]);
             } else {
-                // For ESP requests (validated by validateEspRequest), always return ANY running session
-                // This matches the behavior of get_live_data used by the web UI
-                $stmt = $dbh->query("SELECT session_id,status,set_temp,set_humidity FROM drying_sessions WHERE status='Running' ORDER BY start_time DESC LIMIT 1");
+                // For ESP requests, scope running session to the validated prototype if available.
+                if ($proto_id > 0) {
+                    $stmt = $dbh->prepare("SELECT session_id,status,set_temp,set_humidity FROM drying_sessions WHERE status='Running' AND proto_id=:pid ORDER BY start_time DESC LIMIT 1");
+                    $stmt->execute([':pid' => $proto_id]);
+                } else {
+                    $stmt = $dbh->query("SELECT session_id,status,set_temp,set_humidity FROM drying_sessions WHERE status='Running' ORDER BY start_time DESC LIMIT 1");
+                }
             }
             $data = $stmt->fetch(PDO::FETCH_ASSOC);
             sendResponse('success', 'Status fetched.', $data ?: []);
@@ -483,6 +598,11 @@ switch ($action) {
     // ============================================================
     case 'get_live_data':
         try {
+            // Allow the current heartbeat to promote any due scheduled batch before reading status.
+            validateScheduledSessions($dbh);
+
+            $offlineFailedStart = null;
+
             // For proto_id requests, find the running session for this prototype
             if ($proto_id > 0) {
                 $sessionStmt = $dbh->prepare(
@@ -550,6 +670,10 @@ switch ($action) {
                 ]);
             }
 
+            if (!$session && !$deviceOnline) {
+                $offlineFailedStart = recordOfflineScheduledStartFailure($dbh, $proto_id);
+            }
+
             // If no active session, get FRESH sensor reading from live_sensor_cache (not old logs)
             if (!$session) {
                 // Use database time for comparison to avoid timezone issues
@@ -588,6 +712,7 @@ switch ($action) {
                         'cooldown_remaining' => 0,
                         'device_online'      => $isOnline,
                         'data_age_seconds'   => $liveCache['age_seconds'] ?? null,
+                        'failed_to_start'    => $offlineFailedStart,
                     ]);
                 } else {
                     // No sensor data OR device offline (stale data)
@@ -605,6 +730,7 @@ switch ($action) {
                         'ctrl_status'        => 'IDLE',
                         'cooldown_remaining' => 0,
                         'device_online'      => false,
+                        'failed_to_start'    => $offlineFailedStart,
                     ]);
                 }
             }
@@ -826,7 +952,11 @@ switch ($action) {
             $stmt = $dbh->query(
                 "SELECT ds.session_id, u.username, u.id AS user_id,
                     ds.start_time, ds.end_time,
-                    ds.set_temp, ds.set_humidity, ds.status,
+                    ds.set_temp, ds.set_humidity,
+                    CASE
+                        WHEN COALESCE(ds.notes, '') LIKE '%FailedToStart%' THEN 'FailedToStart'
+                        ELSE ds.status
+                    END AS status,
                     TIMEDIFF(COALESCE(ds.end_time,NOW()),ds.start_time) AS duration,
                     ROUND(AVG(dl.recorded_temp),2)     AS avg_temp,
                     ROUND(AVG(dl.recorded_humidity),2) AS avg_hum,
@@ -875,10 +1005,10 @@ switch ($action) {
                     p.model_name, p.given_code,
                     CONCAT('FISDA - ', COALESCE(p.model_name, 'Fishda'), ' + ', COALESCE(p.given_code, 'FD2026')) AS display_name,
                     CASE 
+                        WHEN COALESCE(ds.notes, '') LIKE '%FailedToStart%' THEN 'FailedToStart'
                         WHEN ds.status = 'Running' THEN 'Running'
-                        WHEN ds.schedule_id IS NOT NULL AND ds.status = 'Interrupted' THEN 'Terminated'
                         WHEN ds.status = 'Completed' THEN 'Completed'
-                        WHEN ds.status = 'Interrupted' THEN 'Stopped'
+                        WHEN ds.status = 'Interrupted' THEN 'Terminated'
                         ELSE COALESCE(ds.status, 'Unknown')
                     END AS display_status
                  FROM drying_sessions ds
@@ -995,12 +1125,28 @@ switch ($action) {
     case 'get_my_records':
         try {
             $stmt = $dbh->prepare(
-                "SELECT dr.id, dr.batch_id, dr.duration, dr.energy,
-                        dr.temp_avg, dr.hum_avg, dr.status, dr.timestamp,
-                        dr.session_id
-                 FROM drying_records dr
-                 WHERE dr.user_id = :uid
-                 ORDER BY dr.timestamp DESC"
+                "SELECT ds.session_id AS id,
+                        ds.proto_id AS batch_id,
+                        TIMEDIFF(COALESCE(ds.end_time,NOW()),ds.start_time) AS duration,
+                        0 AS energy,
+                        COALESCE(la.temp_avg, 0) AS temp_avg,
+                        COALESCE(la.hum_avg, 0) AS hum_avg,
+                        CASE
+                            WHEN COALESCE(ds.notes, '') LIKE '%FailedToStart%' THEN 'FailedToStart'
+                            ELSE ds.status
+                        END AS status,
+                        COALESCE(ds.end_time, ds.start_time) AS timestamp,
+                        ds.session_id
+                 FROM drying_sessions ds
+                 LEFT JOIN (
+                    SELECT session_id,
+                           ROUND(AVG(recorded_temp),2) AS temp_avg,
+                           ROUND(AVG(recorded_humidity),2) AS hum_avg
+                    FROM drying_logs
+                    GROUP BY session_id
+                 ) la ON la.session_id = ds.session_id
+                 WHERE ds.user_id = :uid AND ds.status <> 'Running'
+                 ORDER BY COALESCE(ds.end_time, ds.start_time) DESC"
             );
             $stmt->execute([':uid' => $user_id]);
             sendResponse('success', 'Records fetched.', $stmt->fetchAll(PDO::FETCH_ASSOC));
@@ -1016,12 +1162,31 @@ switch ($action) {
         if (!$is_admin) sendResponse('error','Admin only.');
         try {
             $stmt = $dbh->query(
-                "SELECT dr.id, dr.batch_id, dr.duration, dr.energy,
-                        dr.temp_avg, dr.hum_avg, dr.status, dr.timestamp,
-                        u.username
-                 FROM drying_records dr
-                 LEFT JOIN tblusers u ON u.id = dr.user_id
-                 ORDER BY dr.timestamp DESC"
+                "SELECT ds.session_id AS id,
+                        ds.proto_id AS batch_id,
+                        TIMEDIFF(COALESCE(ds.end_time,NOW()),ds.start_time) AS duration,
+                        0 AS energy,
+                        COALESCE(la.temp_avg, 0) AS temp_avg,
+                        COALESCE(la.hum_avg, 0) AS hum_avg,
+                        CASE
+                            WHEN COALESCE(ds.notes, '') LIKE '%FailedToStart%' THEN 'FailedToStart'
+                            ELSE ds.status
+                        END AS status,
+                        COALESCE(ds.end_time, ds.start_time) AS timestamp,
+                        COALESCE(p.model_name, 'Unknown Model') AS prototype_model,
+                        COALESCE(p.given_code, '') AS prototype_code,
+                        COALESCE(CONCAT(p.model_name, ' (', p.given_code, ')'), CONCAT('Prototype #', ds.proto_id), CONCAT('Session #', ds.session_id)) AS prototype_label
+                 FROM drying_sessions ds
+                 LEFT JOIN (
+                    SELECT session_id,
+                           ROUND(AVG(recorded_temp),2) AS temp_avg,
+                           ROUND(AVG(recorded_humidity),2) AS hum_avg
+                    FROM drying_logs
+                    GROUP BY session_id
+                 ) la ON la.session_id = ds.session_id
+                 LEFT JOIN tbl_prototypes p ON p.id = ds.proto_id
+                 WHERE ds.status <> 'Running'
+                 ORDER BY COALESCE(ds.end_time, ds.start_time) DESC"
             );
             sendResponse('success','All records fetched.',$stmt->fetchAll(PDO::FETCH_ASSOC));
         } catch(Exception $e){ sendResponse('error',$e->getMessage()); }

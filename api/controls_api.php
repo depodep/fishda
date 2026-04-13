@@ -99,9 +99,9 @@ switch ($action) {
 
             // Create new session
             $dbh->prepare(
-                "INSERT INTO drying_sessions (user_id, set_temp, set_humidity, status, start_time)
-                 VALUES (:uid, :t, :h, 'Running', NOW())"
-            )->execute([':uid' => $uid, ':t' => $t, ':h' => $h]);
+                 "INSERT INTO drying_sessions (user_id, proto_id, set_temp, set_humidity, status, start_time)
+                  VALUES (:uid, :pid, :t, :h, 'Running', NOW())"
+              )->execute([':uid' => $uid, ':pid' => $proto_id ?: null, ':t' => $t, ':h' => $h]);
             $session_id = $dbh->lastInsertId();
 
             // Sync drying_controls row

@@ -12,6 +12,15 @@ function sendResponse($status, $message, $data = []) {
     exit;
 }
 
+function normalizePrototypeStatus($raw) {
+    if (is_string($raw)) {
+        $v = strtolower(trim($raw));
+        if ($v === 'active' || $v === 'enabled' || $v === 'enable' || $v === '1' || $v === 'true') return 1;
+        if ($v === 'disabled' || $v === 'disable' || $v === 'inactive' || $v === '0' || $v === 'false') return 0;
+    }
+    return intval($raw) === 1 ? 1 : 0;
+}
+
 $action = $_POST['action'] ?? $_GET['action'] ?? null;
 if (!$action) sendResponse('error', 'No action specified.');
 
@@ -54,12 +63,20 @@ switch ($action) {
 
     // Update prototype status (activate/restrict)
     case 'update_status':
-        $id     = filter_var($_POST['id'] ?? 0, FILTER_VALIDATE_INT);
-        $status = intval($_POST['status'] ?? 1);
+        $id     = filter_var($_POST['id'] ?? $_POST['proto_id'] ?? 0, FILTER_VALIDATE_INT);
+        $status = normalizePrototypeStatus($_POST['status'] ?? 1);
         if (!$id) sendResponse('error', 'Invalid prototype ID.');
         try {
-            $dbh->prepare("UPDATE tbl_prototypes SET status=:s WHERE id=:id")->execute([':s'=>$status,':id'=>$id]);
-            sendResponse('success', 'Status updated.');
+            $upd = $dbh->prepare("UPDATE tbl_prototypes SET status=:s WHERE id=:id");
+            $upd->execute([':s'=>$status,':id'=>$id]);
+            if ($upd->rowCount() < 1) {
+                $chk = $dbh->prepare("SELECT id FROM tbl_prototypes WHERE id=:id LIMIT 1");
+                $chk->execute([':id' => $id]);
+                if (!$chk->fetch(PDO::FETCH_ASSOC)) {
+                    sendResponse('error', 'Prototype not found.');
+                }
+            }
+            sendResponse('success', 'Status updated.', ['new_status' => $status]);
         } catch (Exception $e) {
             sendResponse('error', 'Failed to update status.');
         }

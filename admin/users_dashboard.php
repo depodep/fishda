@@ -365,7 +365,7 @@ if (!isset($_SESSION['session_logged'])) {
   <div class="nav-clock" id="navClock">00:00:00</div>
   <div class="nav-section">Main Menu</div>
   <a class="nav-item active" id="link-control" onclick="showTab('control')"><i class="fas fa-sliders"></i>Drying Control</a>
-  <a class="nav-item" id="link-history" onclick="showTab('history')"><i class="fas fa-clock-rotate-left"></i>Drying Records</a>
+  <a class="nav-item" id="link-history" onclick="showTab('history')"><i class="fas fa-clock-rotate-left"></i>Completed Sessions</a>
   <a class="nav-item" id="link-schedule" onclick="showTab('schedule')"><i class="fas fa-calendar-days"></i>Drying Calendar</a>
   <div class="sidebar-user">
     <div class="user-card">
@@ -525,7 +525,7 @@ if (!isset($_SESSION['session_logged'])) {
                 <span class="range-name"><i class="fas fa-hourglass-half me-2" style="color:var(--golden)"></i>Run Duration</span>
                 <span class="range-val" id="durationVal" style="color:var(--golden);font-size:20px;">2.0h</span>
               </div>
-              <input type="number" id="durationHours" min="0.5" max="24" step="0.5" value="2" class="form-input" style="font-size:12px;" oninput="document.getElementById('durationVal').textContent=(parseFloat(this.value||0)||0).toFixed(1)+'h'">
+              <input type="text" id="durationHours" value="2" class="form-input" style="font-size:12px;" placeholder="2 or 01:30" oninput="updateDurationPreview()">
             </div>
             <div id="controlSection">
               <button class="btn-start" id="startBtn" onclick="startSession()"><i class="fas fa-robot me-2"></i>Start Auto Session</button>
@@ -560,6 +560,7 @@ if (!isset($_SESSION['session_logged'])) {
                 <!-- Scheduled Duration Info -->
                 <div id="scheduledDuration" style="display:none;margin-top:4px;">
                   <div style="font-size:9px;color:var(--text-muted);">Scheduled: <span id="scheduledHours" style="color:var(--amber);font-weight:600;">2.0h</span></div>
+                  <div style="font-size:9px;color:var(--text-muted);">Finish at: <span id="scheduledFinishAt" style="color:var(--teal);font-weight:600;">—</span></div>
                 </div>
                 
                 <!-- Cycle Count -->
@@ -613,19 +614,31 @@ if (!isset($_SESSION['session_logged'])) {
                   </div>
                 </div>
               </div>
+              
             </div>
           </div>
         </div>
 
-        <!-- Live Mini Chart -->
-        
+        <!-- Upcoming Batches (Control Tab) -->
+        <div class="col-lg-4">
+          <div class="glass-card" style="padding:22px;height:100%;">
+            <div class="d-flex align-items-center justify-content-between mb-3">
+              <div class="card-title mb-0"><span class="card-title-dot me-2" style="background:var(--teal)"></span>Upcoming Batches</div>
+              <button onclick="loadUserSchedules()" class="btn-outline-cmd" style="padding:4px 10px;font-size:10px;"><i class="fas fa-rotate me-1"></i>Refresh</button>
+            </div>
+            <div id="schedulesListControl">
+              <div style="text-align:center;padding:24px;color:var(--text-muted);font-size:12px;"><i class="fas fa-spinner fa-spin me-2"></i>Loading upcoming batches...</div>
+            </div>
+          </div>
+        </div>
+
       </div>
     </div><!-- /tab-control -->
 
     <!-- ════════════════ TAB: MY SESSIONS ════════════════ -->
     <div id="tab-history" class="tab-section">
       <div class="page-header">
-        <div class="page-title"><i class="fas fa-folder-open me-2"></i>Drying Records</div>
+        <div class="page-title"><i class="fas fa-folder-open me-2"></i>Completed Sessions</div>
         <div class="page-sub">// All completed prototype cycles for <?= $model_name ?> — <?= $given_code ?></div>
       </div>
       <div class="row g-3 mb-4">
@@ -664,7 +677,7 @@ if (!isset($_SESSION['session_logged'])) {
       </div>
       <div class="glass-card" style="padding:22px;">
         <div class="d-flex align-items-center justify-content-between mb-3">
-          <div class="card-title"><span class="card-title-dot me-2" style="background:var(--teal)"></span>Drying History</div>
+          <div class="card-title"><span class="card-title-dot me-2" style="background:var(--teal)"></span>Session History</div>
           <button onclick="fetchMyRecords()" class="btn-outline-cmd"><i class="fas fa-rotate me-1"></i>Refresh</button>
         </div>
         <div class="section-scroll">
@@ -758,8 +771,8 @@ if (!isset($_SESSION['session_logged'])) {
     <div class="row g-3 mt-2">
       <div class="col-6">
         <div class="form-row">
-          <label class="form-label">Duration (hours)</label>
-          <input type="number" id="sched_duration" class="form-input" value="2.0" min="0.5" max="24" step="0.5">
+          <label class="form-label">Duration (HH:MM or hours)</label>
+          <input type="text" id="sched_duration" class="form-input" value="02:00" placeholder="01:30 or 1.5">
         </div>
       </div>
       <div class="col-6">
@@ -806,9 +819,10 @@ let currentSetTemp=50, currentSetHum=30;
 let liveLabels=[], liveTemps=[], liveHums=[];
 let notifList=[], timerInterval=null, protoStatusTimer=null;
 let prototypeOnline=false; // Track device online status
-let autoStartAttempted=false;
 let sessionDurationHours=null;
 let autoDurationStopTriggered=false;
+let editingScheduleId=null;
+const MIN_DURATION_HOURS = (1/60); // 1 minute
 
 // Clock
 setInterval(()=>{
@@ -848,15 +862,20 @@ async function startSession(isAutoStart=false){
 
   const temp=document.getElementById('tempRange').value;
   const hum=document.getElementById('humRange').value;
-  const durationRaw=parseFloat(document.getElementById('durationHours')?.value || '2');
-  const durationHours=Math.min(24, Math.max(0.5, isNaN(durationRaw) ? 2 : durationRaw));
+  const durationInput=(document.getElementById('durationHours')?.value || '2').trim();
+  let durationHours=parseDurationHoursInput(durationInput);
+  if(durationHours===null){
+    showToast('warning','Invalid Duration','Use decimal hours (e.g. 2) or HH:MM (e.g. 01:30).',3500);
+    return;
+  }
+  durationHours=Math.min(24, Math.max(MIN_DURATION_HOURS, durationHours));
 
   if(!isAutoStart){
     const r=await Swal.fire({
       title:'Start Auto Session?',
       html:`<div style="text-align:center;padding:8px 0;">
         <div style="font-size:14px;color:#4A6FA5;margin-bottom:6px;">Target: <b>${temp}°C</b> / <b>${hum}%</b> Humidity</div>
-        <div style="font-size:12px;color:#8BA7C4;">Duration: <b>${durationHours.toFixed(1)} hour(s)</b></div>
+        <div style="font-size:12px;color:#8BA7C4;">Duration: <b>${formatDurationDisplay(durationHours)}</b></div>
       </div>`,
       icon:'question',showCancelButton:true,confirmButtonColor:'#2A9D8F',
       confirmButtonText:'Start',background:'#fff',color:'#0D1B2A'
@@ -882,7 +901,7 @@ async function startSession(isAutoStart=false){
       updateControlUI(true,temp,hum);
       updateSessionBadge(true);
       startTimer();
-      showToast('success','Session Started!',`Auto run for ${durationHours.toFixed(1)}h at ${temp}°C / ${hum}%`,4000);
+      showToast('success','Session Started!',`Auto run for ${formatDurationDisplay(durationHours)} at ${temp}°C / ${hum}%`,4000);
       pollLiveData();
     } else { showToast('warning','Error',j.message||'Could not start.',4000); }
   }catch(e){ showToast('warning','Network Error','Could not reach server.',3000); }
@@ -894,19 +913,27 @@ async function autoStopByDuration(){
 
   try {
     const fd = new FormData();
-    fd.append('action', 'emergency_stop');
-    const response = await fetch('../api/controls_api.php', { method: 'POST', body: fd });
+    fd.append('action', 'stop_session');
+    if (sessionId) fd.append('session_id', String(sessionId));
+    fd.append('save_reason', 'AutoDuration');
+    const response = await fetch('../api/session_api.php', { method: 'POST', body: fd });
     const j = await response.json();
     if (j.status === 'success') {
       sessionRunning = false;
       sessionId = null;
+      startTimeEpoch = null;
       sessionDurationHours = null;
+      autoDurationStopTriggered = false;
       clearInterval(timerInterval);
       updateControlUI(false);
       updateSessionBadge(false);
       hideBanners();
       showToast('success', 'Session Completed', 'Duration reached. Session stopped automatically.', 4500);
     } else {
+      // Fallback hard stop if graceful stop fails
+      const fallbackFd = new FormData();
+      fallbackFd.append('action', 'emergency_stop');
+      await fetch('../api/controls_api.php', { method: 'POST', body: fallbackFd });
       autoDurationStopTriggered = false;
     }
   } catch (e) {
@@ -923,7 +950,7 @@ async function stopSession(){
         <p><strong>This will:</strong></p>
         <ul style="text-align: left; margin-left: 20px;">
           <li>Turn off all fans and heaters immediately</li>
-          <li>Mark session as "Completed"</li>
+          <li>Mark session as "Terminated"</li>
           <li>Save current progress to records</li>
           <li>Stop temperature cycling</li>
         </ul>
@@ -957,9 +984,11 @@ async function stopSession(){
     });
     
     const fd = new FormData();
-    fd.append('action', 'emergency_stop');
-    
-    const response = await fetch('../api/controls_api.php', {
+    fd.append('action', 'stop_session');
+    if (sessionId) fd.append('session_id', String(sessionId));
+    fd.append('save_reason', 'Manual');
+
+    let response = await fetch('../api/session_api.php', {
       method: 'POST', 
       body: fd
     });
@@ -969,6 +998,13 @@ async function stopSession(){
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
     
+    // If normal stop failed at transport layer, fallback to emergency stop.
+    if (!response.ok) {
+      const fallbackFd = new FormData();
+      fallbackFd.append('action', 'emergency_stop');
+      response = await fetch('../api/controls_api.php', { method: 'POST', body: fallbackFd });
+    }
+
     // Get response text first to check if it's valid JSON
     const responseText = await response.text();
     let j;
@@ -983,6 +1019,10 @@ async function stopSession(){
     
     if (j.status === 'success') {
       sessionRunning = false;
+      sessionId = null;
+      startTimeEpoch = null;
+      sessionDurationHours = null;
+      autoDurationStopTriggered = false;
       clearInterval(timerInterval);
       updateControlUI(false);
       updateSessionBadge(false);
@@ -998,7 +1038,7 @@ async function stopSession(){
         set_temp: null
       });
       
-      showToast('success', '✅ Session Stopped', 'All heating devices turned off. Session data saved.', 5000);
+      showToast('success', '✅ Session Terminated', 'All heating devices turned off. Session marked as terminated.', 5000);
     } else {
       showToast('error', 'Stop Failed', j.message || 'Could not stop session.', 4000);
     }
@@ -1012,6 +1052,41 @@ async function stopSession(){
 function hideBanners(){
   document.getElementById('fishReadyBanner').style.display='none';
   document.getElementById('cooldownBanner').style.display='none';
+}
+
+function parseDurationHoursInput(raw){
+  const v = String(raw || '').trim();
+  if(!v) return 2;
+  if(/^\d{1,2}:\d{2}$/.test(v)){
+    const parts=v.split(':');
+    const hh=parseInt(parts[0],10);
+    const mm=parseInt(parts[1],10);
+    if(Number.isNaN(hh) || Number.isNaN(mm) || mm < 0 || mm > 59) return null;
+    return hh + (mm/60);
+  }
+  const n=parseFloat(v);
+  if(Number.isNaN(n)) return null;
+  return n;
+}
+
+function formatDurationDisplay(hours){
+  const totalMins=Math.round((parseFloat(hours)||0)*60);
+  const hh=Math.floor(totalMins/60);
+  const mm=totalMins%60;
+  return `${hh.toString().padStart(2,'0')}:${mm.toString().padStart(2,'0')}`;
+}
+
+function updateDurationPreview(){
+  const raw=document.getElementById('durationHours')?.value || '';
+  const hours=parseDurationHoursInput(raw);
+  const label=document.getElementById('durationVal');
+  if(!label) return;
+  if(hours===null){
+    label.textContent='Invalid';
+    return;
+  }
+  const clamped=Math.min(24, Math.max(MIN_DURATION_HOURS, hours));
+  label.textContent=`${formatDurationDisplay(clamped)} (${clamped.toFixed(1)}h)`;
 }
 
 function updateControlUI(running,temp,hum){
@@ -1028,7 +1103,7 @@ function updateControlUI(running,temp,hum){
     document.getElementById('phaseBadge').innerHTML='<i class="fas fa-fan me-1"></i>Heating';
     
     // Show stop button when session is running
-    if(stopBtn) stopBtn.style.display='none';
+    if(stopBtn) stopBtn.style.display='inline-flex';
     
     // Show session timer when active
     if(sessionTimer) sessionTimer.style.display='block';
@@ -1265,8 +1340,7 @@ function updateScheduledSessionDisplay(data) {
     scheduleTitle.textContent = data.schedule_title;
     
     if (data.schedule_date && data.schedule_time) {
-      const schedDate = new Date(data.schedule_date + 'T' + data.schedule_time);
-      scheduleTime.textContent = `Scheduled for ${schedDate.toLocaleDateString()} at ${schedDate.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`;
+      scheduleTime.textContent = `Scheduled for ${data.schedule_date} at ${formatTime12h(data.schedule_time)}`;
     } else {
       scheduleTime.textContent = 'Auto-started from schedule';
     }
@@ -1295,7 +1369,7 @@ function updateDryingProgressDisplay(data) {
   
   if (sessionRunning) {
     sessionTimer.style.display = 'block';
-    stopBtn.style.display = 'none';
+    stopBtn.style.display = 'inline-flex';
     
     // Update timer label and display based on session type
     if (data.is_scheduled && data.duration_hours) {
@@ -1356,8 +1430,7 @@ async function pollSensorAlways(){
       const d=j.data;
       const isOnline = d.device_online !== false; // true if online or not specified
       
-      // Display data if we have recorded_temp, regardless of online status
-      // (stale data is better than no data)
+      // Show idle readings whenever backend has sensor data.
       if(d.recorded_temp !== null){
         const t=parseFloat(d.recorded_temp);
         const h=parseFloat(d.recorded_humidity);
@@ -1366,29 +1439,24 @@ async function pollSensorAlways(){
 
         document.getElementById('liveTemp').textContent=t.toFixed(1);
         document.getElementById('liveHum').textContent=h.toFixed(1);
-        
-        // Update device status indicator (reflects actual online state)
-        updateDeviceStatus(isOnline);
+
         updateMiniChart(t,h);
-        console.log('✅ UI updated successfully' + (!isOnline ? ' (stale data)' : ''));
+        console.log('✅ UI updated successfully');
       } else {
-        // No data available at all
-        console.log('⚠️ No sensor data available');
+        // No sensor data.
+        console.log(isOnline ? '⚠️ No sensor data available' : '⚠️ Device offline: no data available');
         document.getElementById('liveTemp').textContent='—';
         document.getElementById('liveHum').textContent='—';
-        updateDeviceStatus(false);
       }
     } else {
       console.log('❌ API returned error or no data');
       document.getElementById('liveTemp').textContent='—';
       document.getElementById('liveHum').textContent='—';
-      updateDeviceStatus(false);
     }
   }catch(e){
     console.error('❌ Polling error:', e);
     document.getElementById('liveTemp').textContent='—';
     document.getElementById('liveHum').textContent='—';
-    updateDeviceStatus(false);
   }
   setTimeout(pollSensorAlways, 3000);
 }
@@ -1406,6 +1474,8 @@ async function pollLiveData(){
       const d=j.data;
       const temp=parseFloat(d.recorded_temp)||0;
       const hum=parseFloat(d.recorded_humidity)||0;
+      const isOnline = d.device_online !== false;
+      updateDeviceStatus(isOnline);
 
       if(d.set_temp)     currentSetTemp=parseFloat(d.set_temp);
       if(d.set_humidity) currentSetHum=parseFloat(d.set_humidity);
@@ -1444,7 +1514,7 @@ async function pollLiveData(){
           recorded_temp: temp,
           set_temp: currentSetTemp
         });
-        if(d.recorded_temp!==null){
+        if(isOnline && d.recorded_temp!==null){
           document.getElementById('liveTemp').textContent=temp.toFixed(1);
           document.getElementById('liveHum').textContent=hum.toFixed(1);
           
@@ -1468,7 +1538,7 @@ async function pollLiveData(){
       
       startTimer(); // Resume normal elapsed time timer
 
-      if(d.recorded_temp!==null){
+      if(isOnline && d.recorded_temp!==null){
         document.getElementById('liveTemp').textContent=temp.toFixed(1);
         document.getElementById('liveHum').textContent=hum.toFixed(1);
         
@@ -1485,6 +1555,9 @@ async function pollLiveData(){
             `Temp ${temp.toFixed(1)}°C / Humidity ${hum.toFixed(1)}% — targets reached! 5-min cooldown in progress.`;
           showToast('success','🎉 Targets Reached!','5-min cooldown started. System will auto-resume heating.',5000);
         }
+      } else {
+        document.getElementById('liveTemp').textContent='—';
+        document.getElementById('liveHum').textContent='—';
       }
     } else if(j.status==='error'){
       sessionRunning=false;
@@ -1778,7 +1851,7 @@ async function fetchMyRecords(){
       document.getElementById('myRecordsBody').innerHTML=`<tr><td colspan="8" style="text-align:center;padding:48px;color:var(--text-muted)">
         <div style="font-size:28px;margin-bottom:8px">🐟</div>
         <div style="font-size:13px;font-weight:700;color:var(--text-primary)">No sessions yet</div>
-        <div style="font-size:11.5px;margin-top:3px">Start a prototype drying session to see your records here.</div>
+        <div style="font-size:11.5px;margin-top:3px">Start a prototype drying session to see your sessions here.</div>
       </td></tr>`;
     }
   }catch(e){
@@ -1827,11 +1900,96 @@ function closeDetailChart(){
 //  SCHEDULE
 // ════════════════════════════════════════════════════════
 function openScheduleModal(){
-  const today=new Date().toISOString().slice(0,10);
+  const nowParts=getManilaNowParts();
+  const today=getManilaTodayString();
+  const nextHour = String((parseInt(nowParts.hour,10)+1)%24).padStart(2,'0');
   document.getElementById('sched_date').value=today;
+  document.getElementById('sched_date').min=today;
+  document.getElementById('sched_time').value=`${nextHour}:00`;
   document.getElementById('scheduleModal').style.display='flex';
 }
-function closeScheduleModal(){ document.getElementById('scheduleModal').style.display='none'; }
+function closeScheduleModal(){
+  editingScheduleId=null;
+  document.querySelector('#scheduleModal .modal-title').innerHTML='<i class="fas fa-calendar-plus me-2"></i>Add New Batch';
+  document.querySelector('#scheduleModal button.btn-primary').textContent='Add Batch';
+  document.getElementById('scheduleModal').style.display='none';
+}
+
+function normalizeScheduleStatus(status){
+  return status === 'Running' ? 'ONGOING' : (status || 'Scheduled');
+}
+
+function scheduleStatusClass(status){
+  return status === 'Running' ? 'Running' : (status || 'Scheduled');
+}
+
+function getManilaNowParts(){
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false
+  }).formatToParts(new Date());
+  const map = {};
+  parts.forEach(part => {
+    if (part.type !== 'literal') map[part.type] = part.value;
+  });
+  return map;
+}
+
+function getManilaTodayString(){
+  const p = getManilaNowParts();
+  return `${p.year}-${p.month}-${p.day}`;
+}
+
+function getManilaNowTimeString(){
+  const p = getManilaNowParts();
+  return `${p.hour}:${p.minute}`;
+}
+
+function formatTime12h(timeValue){
+  if(!timeValue) return '—';
+  const t=String(timeValue).slice(0,5);
+  const parts=t.split(':');
+  if(parts.length<2) return t;
+  const hh=parseInt(parts[0],10);
+  const mm=parseInt(parts[1],10);
+  if(Number.isNaN(hh) || Number.isNaN(mm)) return t;
+  const hour12 = hh % 12 || 12;
+  const suffix = hh >= 12 ? 'pm' : 'am';
+  return `${String(hour12).padStart(2,'0')}:${String(mm).padStart(2,'0')} ${suffix}`;
+}
+
+function formatScheduleDateTime(dateValue, timeValue){
+  const dateText = dateValue || '—';
+  const timeText = formatTime12h(timeValue);
+  return `${dateText} ${timeText}`;
+}
+
+function isScheduleInPastManila(dateValue, timeValue){
+  if(!dateValue || !timeValue) return true;
+  const today=getManilaTodayString();
+  const nowTime=getManilaNowTimeString();
+  const scheduleTime=String(timeValue).slice(0,5);
+  if(dateValue < today) return true;
+  if(dateValue > today) return false;
+  return scheduleTime < nowTime;
+}
+
+function openEditSchedule(encoded){
+  const schedule=JSON.parse(decodeURIComponent(encoded));
+  editingScheduleId = schedule.id;
+  document.querySelector('#scheduleModal .modal-title').innerHTML='<i class="fas fa-pen-to-square me-2"></i>Edit Batch';
+  document.querySelector('#scheduleModal button.btn-primary').textContent='Save Changes';
+  document.getElementById('sched_title').value=schedule.title||'Tilapia Batch';
+  document.getElementById('sched_date').value=schedule.sched_date||'';
+  document.getElementById('sched_time').value=(schedule.sched_time||'08:00').slice(0,5);
+  document.getElementById('sched_temp').value=schedule.set_temp??50;
+  document.getElementById('sched_hum').value=schedule.set_humidity??30;
+  document.getElementById('sched_duration').value=formatDurationDisplay(parseFloat(schedule.duration_hours??2.0));
+  document.getElementById('sched_notes').value=schedule.notes||'';
+  document.getElementById('scheduleModal').style.display='flex';
+}
 
 async function submitSchedule(){
   const title=document.getElementById('sched_title').value.trim();
@@ -1839,20 +1997,34 @@ async function submitSchedule(){
   const time=document.getElementById('sched_time').value;
   const temp=document.getElementById('sched_temp').value;
   const hum=document.getElementById('sched_hum').value;
-  const duration=document.getElementById('sched_duration').value;
+  const durationRaw=(document.getElementById('sched_duration').value || '').trim();
   const notes=document.getElementById('sched_notes').value;
-  
-  console.log('📅 Submitting schedule:', { title, date, time, temp, hum, duration, notes });
+
+  let durationHours=parseDurationHoursInput(durationRaw);
+  if(durationHours===null){
+    showToast('warning','Invalid Duration','Use decimal hours (e.g. 2) or HH:MM (e.g. 01:30).',3000);
+    return;
+  }
+  durationHours=Math.min(24, Math.max(MIN_DURATION_HOURS, durationHours));
+
+  if(isScheduleInPastManila(date, time)){
+    showToast('warning','Past Schedule','Schedule date and time cannot be in the past.',3500);
+    return;
+  }
+
+  console.log('📅 Submitting schedule:', { title, date, time, temp, hum, durationHours, notes });
   
   if(!date){ showToast('warning','Date Required','Please choose a schedule date.',3000); return; }
   const fd=new FormData();
-  fd.append('action','create_schedule');
+  fd.append('action',editingScheduleId ? 'update_schedule' : 'create_schedule');
+  if(editingScheduleId) fd.append('schedule_id',editingScheduleId);
+  fd.append('proto_id',PROTO_ID);
   fd.append('title',title);
   fd.append('sched_date',date);
   fd.append('sched_time',time);
   fd.append('set_temp',temp);
   fd.append('set_hum',hum);
-  fd.append('duration_hours',duration);
+  fd.append('duration_hours',durationHours.toString());
   fd.append('notes',notes);
   try{
     console.log('📤 Sending request to schedule_api.php...');
@@ -1873,10 +2045,11 @@ async function submitSchedule(){
     
     console.log('📥 Parsed response:', j);
     if(j.status==='success'){
+      const wasEdit=!!editingScheduleId;
       closeScheduleModal();
       if(userCal) userCal.refetchEvents();
       loadUserSchedules();
-      showToast('success','Added!','Your batch has been added to the calendar.',3000);
+      showToast('success',wasEdit?'Updated!':'Added!','Schedule saved successfully.',3000);
     } else { 
       console.error('❌ API error:', j.message);
       showToast('warning','Error',j.message||'Failed.',3000); 
@@ -1890,10 +2063,22 @@ async function submitSchedule(){
 async function deleteSchedule(id){
   const r=await Swal.fire({title:'Delete Schedule?',icon:'warning',showCancelButton:true,confirmButtonColor:'#E63946',background:'#fff',color:'#0D1B2A'});
   if(!r.isConfirmed) return;
-  const fd=new FormData(); fd.append('action','delete_schedule'); fd.append('schedule_id',id);
-  await fetch('../api/schedule_api.php',{method:'POST',body:fd});
-  if(userCal) userCal.refetchEvents();
-  loadUserSchedules();
+  const fd=new FormData();
+  fd.append('action','delete_schedule');
+  fd.append('schedule_id',id);
+  fd.append('proto_id',PROTO_ID);
+  try{
+    const j=await(await fetch('../api/schedule_api.php',{method:'POST',body:fd})).json();
+    if(j.status==='success'){
+      if(userCal) userCal.refetchEvents();
+      loadUserSchedules();
+      showToast('success','Removed','Schedule deleted.',2200);
+    } else {
+      showToast('warning','Delete Failed',j.message||'Could not delete schedule.',3000);
+    }
+  }catch(e){
+    showToast('warning','Network Error','Could not delete schedule.',3000);
+  }
 }
 
 function initUserCalendar(){
@@ -1914,18 +2099,40 @@ function initUserCalendar(){
 
 async function loadUserSchedules(){
   try{
-    const j=await(await fetch(`../api/schedule_api.php?action=get_my_schedules&proto_id=${PROTO_ID}`)).json();
-    const el=document.getElementById('schedulesList');
-    if(j.status!=='success'||!j.data?.length){ el.innerHTML=`<div style="text-align:center;padding:24px;color:var(--text-muted);font-size:12px;">No upcoming batches.</div>`; return; }
-    el.innerHTML=j.data.slice(0,8).map(s=>`
+    const j=await(await fetch(`../api/schedule_api.php?action=get_my_schedules&proto_id=${PROTO_ID}&t=${Date.now()}`)).json();
+    const targets=['schedulesList','schedulesListControl']
+      .map(id=>document.getElementById(id))
+      .filter(Boolean);
+    if(!targets.length) return;
+    if(j.status!=='success'||!j.data?.length){
+      const emptyHtml=`<div style="text-align:center;padding:24px;color:var(--text-muted);font-size:12px;">No upcoming batches.</div>`;
+      targets.forEach(el=>{ el.innerHTML=emptyHtml; });
+      return;
+    }
+    const listHtml=j.data.slice(0,8).map(s=>`
       <div class="sched-item">
         <div style="width:36px;height:36px;border-radius:10px;background:rgba(42,157,143,.1);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;">📅</div>
         <div style="flex:1;min-width:0;">
           <div style="font-weight:700;font-size:12.5px;color:var(--text-primary)">${s.title}</div>
-          <div style="font-size:10.5px;color:var(--text-muted)">${s.sched_date} ${s.sched_time?.slice(0,5)}</div>
+          <div style="font-size:15px;font-weight:800;color:var(--text-primary)">${formatScheduleDateTime(s.sched_date, s.sched_time)}</div>
+          <div style="font-size:10.5px;color:var(--text-secondary);font-weight:600;">${s.set_temp}°C / ${s.set_humidity}%</div>
         </div>
-        <span class="pill pill-${s.status}" style="flex-shrink:0;">${s.status === 'Running' ? 'ONGOING' : s.status}</span>
+        <span class="pill pill-${scheduleStatusClass(s.status)}" style="flex-shrink:0;">${normalizeScheduleStatus(s.status)}</span>
+        <div style="display:flex;gap:6px;align-items:center;margin-left:8px;">
+          <button class="act-btn act-edit" style="padding:4px 8px;font-size:10px;" onclick="openEditSchedule('${encodeURIComponent(JSON.stringify({
+            id: s.id,
+            title: s.title,
+            sched_date: s.sched_date,
+            sched_time: s.sched_time,
+            set_temp: s.set_temp,
+            set_humidity: s.set_humidity,
+            notes: s.notes,
+            duration_hours: s.duration_hours
+          }))}')">Edit</button>
+          <button class="act-btn act-del" style="padding:4px 8px;font-size:10px;" onclick="deleteSchedule(${s.id})">Remove</button>
+        </div>
       </div>`).join('');
+    targets.forEach(el=>{ el.innerHTML=listHtml; });
   }catch(e){}
 }
 
@@ -1935,9 +2142,10 @@ function showEventModal(event){
   const evRow=(lbl,val)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border);font-size:12.5px;"><span style="color:var(--text-muted)">${lbl}</span><span style="font-weight:700">${val}</span></div>`;
   let html='';
   if(p.type==='schedule'){
-    html=evRow('Date/Time',event.startStr?.slice(0,16).replace('T',' '))+evRow('Targets',`${p.set_temp}°C / ${p.set_humidity}%`)+`<div style="display:flex;justify-content:space-between;padding:9px 0;font-size:12.5px;"><span style="color:var(--text-muted)">Status</span><span class="pill pill-${p.status}">${p.status}</span></div>`+
+    const statusLabel=normalizeScheduleStatus(p.status);
+    html=evRow('Date/Time',formatScheduleDateTime(event.startStr?.slice(0,10), event.startStr?.slice(11,16)))+evRow('Targets',`${p.set_temp}°C / ${p.set_humidity}%`)+`<div style="display:flex;justify-content:space-between;padding:9px 0;font-size:12.5px;"><span style="color:var(--text-muted)">Status</span><span class="pill pill-${scheduleStatusClass(p.status)}">${statusLabel}</span></div>`+
     (p.notes?`<div style="background:var(--surface-2);border-radius:8px;padding:10px;font-size:11.5px;color:var(--text-muted);margin-top:8px">${p.notes}</div>`:'');
-    document.getElementById('evtActions').innerHTML=`<button onclick="deleteSchedule(${p.schedule_id});closeEventModal()" class="act-btn act-del" style="width:100%;padding:8px;"><i class="fas fa-trash me-1"></i>Delete Schedule</button>`;
+    document.getElementById('evtActions').innerHTML=`<div class="d-flex gap-2"><button onclick="openEditSchedule('${encodeURIComponent(JSON.stringify({id:p.schedule_id,title:event.title.replace(/^. /,''),sched_date:event.startStr?.slice(0,10),sched_time:event.startStr?.slice(11,16),set_temp:p.set_temp,set_humidity:p.set_humidity,notes:p.notes,duration_hours:p.duration_hours||2.0}))}');closeEventModal()" class="act-btn act-edit" style="flex:1;padding:8px;"><i class="fas fa-pen me-1"></i>Edit</button><button onclick="deleteSchedule(${p.schedule_id});closeEventModal()" class="act-btn act-del" style="flex:1;padding:8px;"><i class="fas fa-trash me-1"></i>Remove</button></div>`;
   } else {
     // Session event
     const startTime = p.start_time || event.startStr;
@@ -1999,6 +2207,7 @@ function updateSessionTimingDisplay(d) {
   const sessionTimer = document.getElementById('sessionTimer');
   const scheduledDuration = document.getElementById('scheduledDuration');
   const cycleCount = document.getElementById('cycleCount');
+  const scheduledFinishAt = document.getElementById('scheduledFinishAt');
   
   if (sessionRunning) {
     sessionTimer.style.display = 'block';
@@ -2006,9 +2215,22 @@ function updateSessionTimingDisplay(d) {
     // Show scheduled duration if available
     if (d.duration_hours) {
       scheduledDuration.style.display = 'block';
-      document.getElementById('scheduledHours').textContent = `${d.duration_hours}h`;
+      const dur = parseFloat(d.duration_hours) || 0;
+      document.getElementById('scheduledHours').textContent = `${formatDurationDisplay(dur)} (${dur.toFixed(1)}h)`;
+
+      if (scheduledFinishAt) {
+        if (d.start_time) {
+          const startMs = new Date(String(d.start_time).replace(' ', 'T')).getTime();
+          const endMs = startMs + (dur * 60 * 60 * 1000);
+          const endDate = new Date(endMs);
+          scheduledFinishAt.textContent = `${endDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} · ${endDate.toLocaleDateString()}`;
+        } else {
+          scheduledFinishAt.textContent = '—';
+        }
+      }
     } else {
       scheduledDuration.style.display = 'none';
+      if (scheduledFinishAt) scheduledFinishAt.textContent = '—';
     }
     
     // Show cycle count if available
@@ -2029,6 +2251,7 @@ function updateSessionTimingDisplay(d) {
     sessionTimer.style.display = 'none';
     scheduledDuration.style.display = 'none';
     cycleCount.style.display = 'none';
+    if (scheduledFinishAt) scheduledFinishAt.textContent = '—';
   }
 }
 
@@ -2099,6 +2322,7 @@ checkExistingSession();  // ← CHECK FOR EXISTING SESSION ON PAGE LOAD
 pollSensorAlways();
 pollPrototypeStatus();
 fetchTodayStats(); // Fetch today's session statistics
+loadUserSchedules();
 protoStatusTimer=setInterval(pollPrototypeStatus,5000);
 
 // ── Fetch today's session statistics ──
@@ -2152,12 +2376,11 @@ async function checkExistingSession(){
       const isOnline = d.device_online !== false;
       updateDeviceStatus(isOnline);
 
-      // Display idle sensor data (even if no active session)
-      // Show data even when offline/stale, as long as we have temperature readings
-      if(d.recorded_temp!==null && d.recorded_temp!==''){
+      // Show idle sensor values only while online.
+      if(isOnline && d.recorded_temp!==null && d.recorded_temp!==''){
         document.getElementById('liveTemp').textContent=parseFloat(d.recorded_temp).toFixed(1);
         document.getElementById('liveHum').textContent=parseFloat(d.recorded_humidity).toFixed(1);
-        // Update graph with current data (including during idle/cooldown/offline)
+        // Update graph with fresh data.
         updateMiniChart(parseFloat(d.recorded_temp), parseFloat(d.recorded_humidity));
       } else {
         document.getElementById('liveTemp').textContent='—';
@@ -2181,7 +2404,7 @@ async function checkExistingSession(){
 
         // Show stop button
         const stopBtn = document.getElementById('stopBtn');
-        if(stopBtn) stopBtn.style.display = 'none';
+        if(stopBtn) stopBtn.style.display = 'inline-flex';
 
         // Show session timer
         const sessionTimer = document.getElementById('sessionTimer');
@@ -2203,10 +2426,7 @@ async function checkExistingSession(){
         const stopBtn = document.getElementById('stopBtn');
         if(stopBtn) stopBtn.style.display = 'none';
 
-        if (isOnline && !autoStartAttempted) {
-          autoStartAttempted = true;
-          setTimeout(() => startSession(true), 400);
-        }
+        // Do not auto-start on reload; only restore existing running session.
       }
     } else if(j.status==='error'){
       // Handle API errors properly - ensure UI shows "not running"

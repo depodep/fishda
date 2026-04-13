@@ -12,6 +12,19 @@ if (!isset($_SESSION['username']) || $_SESSION['permission'] !== 'admin') {
 }
 $admin = htmlspecialchars($_SESSION['username']);
 
+function normalizePrototypeStatus($raw) {
+  if (is_string($raw)) {
+    $v = strtolower(trim($raw));
+    if ($v === 'active' || $v === 'enabled' || $v === 'enable' || $v === '1' || $v === 'true') {
+      return 1;
+    }
+    if ($v === 'disabled' || $v === 'disable' || $v === 'inactive' || $v === '0' || $v === 'false') {
+      return 0;
+    }
+  }
+  return intval($raw) === 1 ? 1 : 0;
+}
+
 // AJAX handlers
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     header('Content-Type: application/json');
@@ -20,7 +33,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
       case 'add_prototype':
         $model = trim($_POST['model_name'] ?? '');
         $code  = trim($_POST['given_code'] ?? '');
-        $status = intval($_POST['status'] ?? 1);
+        $status = normalizePrototypeStatus($_POST['status'] ?? 1);
         if (!$model || !$code) { echo json_encode(['status'=>'error','message'=>'Unit/Model and Model Code are required.']); exit; }
         try {
           $chk = $dbh->prepare("SELECT id FROM tbl_prototypes WHERE model_name=:m AND given_code=:c LIMIT 1");
@@ -35,15 +48,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $pid   = intval($_POST['proto_id'] ?? 0);
         $model = trim($_POST['model_name'] ?? '');
         $code  = trim($_POST['given_code'] ?? '');
-        $status = intval($_POST['status'] ?? 1);
+        $status = normalizePrototypeStatus($_POST['status'] ?? 1);
         if ($pid <= 0 || !$model || !$code) { echo json_encode(['status'=>'error','message'=>'Invalid prototype payload.']); exit; }
         try {
           $chk = $dbh->prepare("SELECT id FROM tbl_prototypes WHERE model_name=:m AND given_code=:c AND id<>:id LIMIT 1");
           $chk->execute([':m'=>$model, ':c'=>$code, ':id'=>$pid]);
           if ($chk->fetch()) { echo json_encode(['status'=>'error','message'=>'Another device already uses this Unit/Model + Model Code.']); exit; }
-          $dbh->prepare("UPDATE tbl_prototypes SET model_name=:m,given_code=:c,status=:s WHERE id=:id")
-            ->execute([':m'=>$model, ':c'=>$code, ':s'=>$status, ':id'=>$pid]);
-          echo json_encode(['status'=>'success','message'=>'Device model updated.']);
+          $upd = $dbh->prepare("UPDATE tbl_prototypes SET model_name=:m,given_code=:c,status=:s WHERE id=:id");
+          $upd->execute([':m'=>$model, ':c'=>$code, ':s'=>$status, ':id'=>$pid]);
+
+          if ($upd->rowCount() < 1) {
+            $exists = $dbh->prepare("SELECT id FROM tbl_prototypes WHERE id=:id LIMIT 1");
+            $exists->execute([':id' => $pid]);
+            if (!$exists->fetch(PDO::FETCH_ASSOC)) {
+              echo json_encode(['status'=>'error','message'=>'Device model not found.']);
+              exit;
+            }
+          }
+
+          echo json_encode(['status'=>'success','message'=>'Device model updated.','new_status'=>$status]);
         } catch(Exception $e){ echo json_encode(['status'=>'error','message'=>$e->getMessage()]); }
         exit;
       case 'delete_prototype':
@@ -54,16 +77,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         } catch(Exception $e){ echo json_encode(['status'=>'error','message'=>$e->getMessage()]); }
         exit;
       case 'toggle_prototype_status':
-        $pid = intval($_POST['proto_id'] ?? 0);
+        $pid = intval($_POST['proto_id'] ?? $_POST['id'] ?? 0);
+        if ($pid <= 0) { echo json_encode(['status'=>'error','message'=>'Invalid prototype ID.']); exit; }
         try {
           $row = $dbh->prepare("SELECT status FROM tbl_prototypes WHERE id=:id");
           $row->execute([':id'=>$pid]);
           $cur = $row->fetch(PDO::FETCH_ASSOC);
           if (!$cur) { echo json_encode(['status'=>'error','message'=>'Prototype not found.']); exit; }
-          $new = ((string)$cur['status'] === '1') ? 0 : 1;
-          $dbh->prepare("UPDATE tbl_prototypes SET status=:s WHERE id=:id")->execute([':s'=>$new,':id'=>$pid]);
-          echo json_encode(['status'=>'success','message'=> $new ? 'Device model enabled.' : 'Device model disabled.']);
+          $new = (intval($cur['status']) === 1) ? 0 : 1;
+          $upd = $dbh->prepare("UPDATE tbl_prototypes SET status=:s WHERE id=:id");
+          $upd->execute([':s'=>$new,':id'=>$pid]);
+          echo json_encode(['status'=>'success','message'=> $new ? 'Device model enabled.' : 'Device model disabled.','new_status'=>$new]);
         } catch(Exception $e){ echo json_encode(['status'=>'error','message'=>$e->getMessage()]); }
+        exit;
+      case 'create_schedule_admin':
+        echo json_encode(['status'=>'error','message'=>'Schedule management is available only on Prototype Dashboard.']);
+        exit;
+      case 'update_schedule_admin':
+        echo json_encode(['status'=>'error','message'=>'Schedule management is available only on Prototype Dashboard.']);
+        exit;
+      case 'delete_schedule_admin':
+        echo json_encode(['status'=>'error','message'=>'Schedule management is available only on Prototype Dashboard.']);
         exit;
         case 'stop_session':
             $sid = intval($_POST['session_id'] ?? 0);
@@ -104,6 +138,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
 if (isset($_GET['action'])) {
     header('Content-Type: application/json');
+    try {
+      $dbh->exec("ALTER TABLE batch_schedules ADD COLUMN IF NOT EXISTS proto_id INT NULL AFTER user_id");
+    } catch (Exception $e) {}
     switch($_GET['action']){
         case 'get_daily_trends':
             try {
@@ -114,49 +151,69 @@ if (isset($_GET['action'])) {
         case 'get_session_detail':
             $sid = intval($_GET['session_id']??0);
             try {
-                $stmt = $dbh->prepare("SELECT recorded_temp,recorded_humidity,phase,heater_state,exhaust_state,fan_state,timestamp FROM drying_logs WHERE session_id=:sid ORDER BY timestamp ASC");
-                $stmt->execute([':sid'=>$sid]);
-                echo json_encode(['status'=>'success','data'=>$stmt->fetchAll(PDO::FETCH_ASSOC)]);
-            } catch(PDOException $e){ echo json_encode(['status'=>'error']); }
-            break;
-        case 'get_stats':
-            try {
-                $stats = $dbh->query("SELECT 
-                    (SELECT COUNT(*) FROM tbl_prototypes) AS total_devices,
-                    (SELECT COUNT(*) FROM drying_sessions) AS total_sessions,
-                    (SELECT COUNT(*) FROM drying_sessions WHERE status='Running') AS active_sessions,
-                    (SELECT COUNT(*) FROM drying_sessions WHERE status='Completed') AS completed,
-                    (SELECT COUNT(*) FROM batch_schedules WHERE status='Scheduled') AS pending_schedules,
-                    (SELECT ROUND(AVG(recorded_temp),1) FROM drying_logs) AS overall_avg_temp"
-                )->fetch(PDO::FETCH_ASSOC);
-                echo json_encode(['status'=>'success','data'=>$stats]);
-            } catch(PDOException $e){ echo json_encode(['status'=>'error']); }
-            break;
-        case 'fetch_all_records':
-            try {
-                $stmt = $dbh->query(
-                    "SELECT dr.id, dr.batch_id, dr.duration, dr.energy,
-                            dr.temp_avg, dr.hum_avg, dr.status, dr.timestamp,
-                            COALESCE(u.username, dr.batch_id) AS username
-                     FROM drying_records dr
-                     LEFT JOIN tblusers u ON u.id = dr.user_id
-                     ORDER BY dr.timestamp DESC"
-                );
-                echo json_encode(['status'=>'success','records'=>$stmt->fetchAll(PDO::FETCH_ASSOC)]);
-            } catch(PDOException $e){ echo json_encode(['status'=>'error','message'=>$e->getMessage()]); }
+        $stmt = $dbh->prepare("SELECT recorded_temp, recorded_humidity, phase, heater_state, exhaust_state, fan_state, timestamp FROM drying_logs WHERE session_id=:sid ORDER BY timestamp ASC");
+        $stmt->execute([':sid'=>$sid]);
+        echo json_encode(['status'=>'success','data'=>$stmt->fetchAll(PDO::FETCH_ASSOC)]);
+      } catch(PDOException $e){ echo json_encode(['status'=>'error']); }
+      break;
+    case 'get_stats':
+      try {
+        $stats = $dbh->query("SELECT 
+          (SELECT COUNT(*) FROM tbl_prototypes) AS total_devices,
+          (SELECT COUNT(*) FROM drying_sessions) AS total_sessions,
+          (SELECT COUNT(*) FROM drying_sessions WHERE status='Running') AS active_sessions,
+          (SELECT COUNT(*) FROM drying_sessions WHERE status='Completed') AS completed,
+          (SELECT COUNT(*) FROM batch_schedules WHERE status='Scheduled') AS pending_schedules,
+          (SELECT ROUND(AVG(recorded_temp),1) FROM drying_logs) AS overall_avg_temp"
+        )->fetch(PDO::FETCH_ASSOC);
+        echo json_encode(['status'=>'success','data'=>$stats]);
+      } catch(PDOException $e){ echo json_encode(['status'=>'error']); }
+      break;
+    case 'fetch_all_records':
+      try {
+        $stmt = $dbh->query(
+          "SELECT ds.session_id AS id,
+              ds.proto_id AS batch_id,
+              ds.set_temp,
+              ds.set_humidity,
+              TIMEDIFF(COALESCE(ds.end_time, NOW()), ds.start_time) AS duration,
+              0 AS energy,
+              COALESCE(la.temp_avg, 0) AS temp_avg,
+              COALESCE(la.hum_avg, 0) AS hum_avg,
+              ds.status,
+              COALESCE(ds.end_time, ds.start_time) AS timestamp,
+              COALESCE(p.model_name, 'Fishda') AS prototype_model,
+              COALESCE(p.given_code, 'FD2026') AS prototype_code,
+              COALESCE(CONCAT(p.model_name, ' (', p.given_code, ')'), CONCAT('Prototype #', ds.proto_id), CONCAT('Session #', ds.session_id)) AS prototype_label
+           FROM drying_sessions ds
+           LEFT JOIN (
+             SELECT session_id,
+                    ROUND(AVG(recorded_temp), 2) AS temp_avg,
+                    ROUND(AVG(recorded_humidity), 2) AS hum_avg
+             FROM drying_logs
+             GROUP BY session_id
+           ) la ON la.session_id = ds.session_id
+           LEFT JOIN tbl_prototypes p ON p.id = ds.proto_id
+           WHERE ds.status <> 'Running'
+           ORDER BY COALESCE(ds.end_time, ds.start_time) DESC, ds.session_id DESC"
+        );
+        echo json_encode(['status'=>'success','records'=>$stmt->fetchAll(PDO::FETCH_ASSOC)]);
+      } catch(PDOException $e){ echo json_encode(['status'=>'error','message'=>$e->getMessage()]); }
             break;
         case 'get_all_sessions_admin':
             try {
                 $stmt = $dbh->query(
-                    "SELECT ds.session_id, u.username,
+          "SELECT ds.session_id, ds.proto_id,
                         ds.start_time, ds.end_time,
                         ds.set_temp, ds.set_humidity, ds.status,
                         TIMEDIFF(COALESCE(ds.end_time,NOW()),ds.start_time) AS duration,
                         ROUND(AVG(dl.recorded_temp),2) AS avg_temp,
                         ROUND(AVG(dl.recorded_humidity),2) AS avg_hum,
-                        COUNT(dl.log_id) AS total_logs
-                     FROM drying_sessions ds
-                     JOIN tblusers u ON u.id=ds.user_id
+            COUNT(dl.log_id) AS total_logs,
+              COALESCE(p.model_name, 'Fishda') AS prototype_model,
+              COALESCE(p.given_code, 'FD2026') AS prototype_code
+           FROM drying_sessions ds
+           LEFT JOIN tbl_prototypes p ON p.id=ds.proto_id
                      LEFT JOIN drying_logs dl ON dl.session_id=ds.session_id
                      GROUP BY ds.session_id
                      ORDER BY ds.start_time DESC"
@@ -177,48 +234,60 @@ if (isset($_GET['action'])) {
         case 'get_live_alerts':
             try {
                 $stmt = $dbh->query(
-                    "SELECT ds.session_id, u.username, ds.set_temp,
+          "SELECT ds.session_id, ds.proto_id, ds.set_temp,
                         (SELECT recorded_temp FROM drying_logs WHERE session_id=ds.session_id ORDER BY timestamp DESC LIMIT 1) AS latest_temp
                      FROM drying_sessions ds
-                     JOIN tblusers u ON u.id=ds.user_id
                      WHERE ds.status='Running'
                      HAVING latest_temp IS NOT NULL AND latest_temp >= (ds.set_temp + 2)"
                 );
                 echo json_encode(['status'=>'success','data'=>$stmt->fetchAll(PDO::FETCH_ASSOC)]);
-            } catch(PDOException $e){ echo json_encode(['status'=>'success','data',[]]); }
+      } catch(PDOException $e){ echo json_encode(['status'=>'success','data'=>[]]); }
             break;
         case 'get_calendar_events':
             try {
                 $events = [];
                 $stmt = $dbh->query(
                     "SELECT bs.id, bs.title, bs.sched_date, bs.sched_time,
-                            bs.set_temp, bs.set_humidity, bs.notes, bs.status, u.username
-                     FROM batch_schedules bs JOIN tblusers u ON u.id=bs.user_id ORDER BY bs.sched_date ASC"
+            bs.set_temp, bs.set_humidity, bs.notes, bs.status, bs.proto_id,
+            CASE
+              WHEN bs.status IN ('Done','Cancelled') THEN bs.status
+              WHEN bs.sched_date = CURDATE() AND bs.sched_time <= CURTIME() THEN 'Running'
+              ELSE 'Scheduled'
+            END AS display_status,
+              COALESCE(CONCAT(p.model_name, ' (', p.given_code, ')'), CONCAT('Prototype #', bs.proto_id), u.username, 'Unassigned Prototype') AS prototype_label
+               FROM batch_schedules bs
+             LEFT JOIN tblusers u ON u.id=bs.user_id
+               LEFT JOIN tbl_prototypes p ON p.id=bs.proto_id
+              WHERE bs.status <> 'Cancelled'
+               ORDER BY bs.sched_date ASC"
                 );
                 $colorMap = ['Scheduled'=>'#0077B6','Running'=>'#f59e0b','Done'=>'#2ec4b6','Cancelled'=>'#ef4444'];
                 foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
                     $events[] = [
                         'id'=>'sched_'.$row['id'], 'title'=>'Schedule: '.$row['title'],
                         'start'=>$row['sched_date'].'T'.$row['sched_time'],
-                        'backgroundColor'=>$colorMap[$row['status']]??'#0077B6',
-                        'borderColor'=>$colorMap[$row['status']]??'#0077B6', 'textColor'=>'#ffffff',
-                        'extendedProps'=>['type'=>'schedule','schedule_id'=>$row['id'],'username'=>$row['username'],
-                            'set_temp'=>$row['set_temp'],'set_humidity'=>$row['set_humidity'],'notes'=>$row['notes'],'status'=>$row['status']]
+                'backgroundColor'=>$colorMap[$row['display_status']]??'#0077B6',
+                'borderColor'=>$colorMap[$row['display_status']]??'#0077B6', 'textColor'=>'#ffffff',
+                'extendedProps'=>['type'=>'schedule','schedule_id'=>$row['id'],'prototype_label'=>$row['prototype_label'],
+                  'proto_id'=>$row['proto_id'],'title'=>$row['title'],'sched_date'=>$row['sched_date'],'sched_time'=>$row['sched_time'],
+                  'set_temp'=>$row['set_temp'],'set_humidity'=>$row['set_humidity'],'notes'=>$row['notes'],'status'=>$row['display_status']]
                     ];
                 }
                 $stmt2 = $dbh->query(
-                    "SELECT ds.session_id, ds.start_time, ds.end_time, ds.set_temp, ds.set_humidity, ds.status, u.username
-                     FROM drying_sessions ds JOIN tblusers u ON u.id=ds.user_id
-                     WHERE ds.status IN ('Completed','Interrupted') ORDER BY ds.start_time DESC LIMIT 200"
+                  "SELECT ds.session_id, ds.start_time, ds.end_time, ds.set_temp, ds.set_humidity, ds.status,
+                      COALESCE(CONCAT(p.model_name, ' (', p.given_code, ')'), CONCAT('Prototype #', ds.proto_id)) AS prototype_label
+                   FROM drying_sessions ds
+                   LEFT JOIN tbl_prototypes p ON p.id=ds.proto_id
+                   WHERE ds.status IN ('Completed','Interrupted') ORDER BY ds.start_time DESC LIMIT 200"
                 );
                 foreach ($stmt2->fetchAll(PDO::FETCH_ASSOC) as $row) {
                     $color = $row['status']==='Completed' ? '#2ec4b6' : '#f97316';
                     $events[] = [
                         'id'=>'sess_'.$row['session_id'],
-                        'title'=>($row['status']==='Completed'?'Completed: ':'Alert: ').$row['username'],
+                    'title'=>($row['status']==='Completed'?'Completed: ':'Alert: ').$row['prototype_label'],
                         'start'=>$row['start_time'], 'end'=>$row['end_time'],
                         'backgroundColor'=>$color, 'borderColor'=>$color, 'textColor'=>'#ffffff',
-                        'extendedProps'=>['type'=>'session','session_id'=>$row['session_id'],'username'=>$row['username'],
+                    'extendedProps'=>['type'=>'session','session_id'=>$row['session_id'],'prototype_label'=>$row['prototype_label'],
                             'set_temp'=>$row['set_temp'],'set_humidity'=>$row['set_humidity'],
                             'status'=>$row['status'],'end_time'=>$row['end_time']]
                     ];
@@ -230,16 +299,31 @@ if (isset($_GET['action'])) {
             try {
                 $stmt = $dbh->query(
                     "SELECT bs.id, bs.title, bs.sched_date, bs.sched_time,
-                            bs.set_temp, bs.set_humidity, bs.notes, bs.status, u.username
-                     FROM batch_schedules bs JOIN tblusers u ON u.id=bs.user_id ORDER BY bs.sched_date DESC"
+              bs.set_temp, bs.set_humidity, bs.notes, bs.status, bs.proto_id,
+            CASE
+              WHEN bs.status IN ('Done','Cancelled') THEN bs.status
+              WHEN bs.sched_date = CURDATE() AND bs.sched_time <= CURTIME() THEN 'Running'
+              ELSE 'Scheduled'
+            END AS display_status,
+              COALESCE(CONCAT(p.model_name, ' (', p.given_code, ')'), CONCAT('Prototype #', bs.proto_id), u.username, 'Unassigned Prototype') AS prototype_label
+               FROM batch_schedules bs
+             LEFT JOIN tblusers u ON u.id=bs.user_id
+               LEFT JOIN tbl_prototypes p ON p.id=bs.proto_id
+             WHERE bs.status <> 'Cancelled'
+             ORDER BY bs.sched_date ASC, bs.sched_time ASC"
                 );
                 echo json_encode(['status'=>'success','data'=>$stmt->fetchAll(PDO::FETCH_ASSOC)]);
             } catch(PDOException $e){ echo json_encode(['status'=>'error','message'=>$e->getMessage()]); }
             break;
         case 'get_inquiries':
           try {
+            $currentDb = (string)$dbh->query("SELECT DATABASE()")->fetchColumn();
+            if ($currentDb === '' || !preg_match('/^[A-Za-z0-9_]+$/', $currentDb)) {
+              throw new Exception('Unable to resolve active database name.');
+            }
+
             $dbh->exec(
-              "CREATE TABLE IF NOT EXISTS tbl_inquiries (
+              "CREATE TABLE IF NOT EXISTS `{$currentDb}`.`tbl_inquiries` (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 name VARCHAR(150) NOT NULL,
                 contact VARCHAR(100) NULL,
@@ -248,8 +332,37 @@ if (isset($_GET['action'])) {
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
               ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
             );
-            $stmt = $dbh->query("SELECT id, name, contact, message, status, created_at FROM tbl_inquiries ORDER BY created_at DESC");
-            echo json_encode(['status' => 'success', 'data' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
+
+            $sourceDb = $currentDb;
+            $maxCount = (int)$dbh->query("SELECT COUNT(*) FROM `{$currentDb}`.`tbl_inquiries`")->fetchColumn();
+
+            if ($maxCount === 0) {
+              $schemas = $dbh->query(
+                "SELECT table_schema
+                 FROM information_schema.tables
+                 WHERE table_name = 'tbl_inquiries'"
+              )->fetchAll(PDO::FETCH_COLUMN);
+
+              foreach ($schemas as $schema) {
+                $schema = (string)$schema;
+                if (!preg_match('/^[A-Za-z0-9_]+$/', $schema)) {
+                  continue;
+                }
+                $count = (int)$dbh->query("SELECT COUNT(*) FROM `{$schema}`.`tbl_inquiries`")->fetchColumn();
+                if ($count > $maxCount) {
+                  $maxCount = $count;
+                  $sourceDb = $schema;
+                }
+              }
+            }
+
+            $stmt = $dbh->query("SELECT id, name, contact, message, status, created_at FROM `{$sourceDb}`.`tbl_inquiries` ORDER BY created_at DESC");
+            echo json_encode([
+              'status' => 'success',
+              'data' => $stmt->fetchAll(PDO::FETCH_ASSOC),
+              'source_db' => $sourceDb,
+              'total' => $maxCount
+            ]);
           } catch (Exception $e) {
             echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
           }
@@ -746,12 +859,11 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
   <div class="nav-clock" id="navClock">00:00:00</div>
   <div class="nav-section">Overview</div>
   <a class="nav-item active" id="link-dashboard" onclick="showTab('dashboard')"><i class="fas fa-chart-pie"></i>Dashboard</a>
-  <a class="nav-item" id="link-sessions" onclick="showTab('sessions')"><i class="fas fa-fish"></i>Drying Sessions<span class="nav-badge" id="badge-sessions" style="display:none">!</span></a>
   <div class="nav-section">Management</div>
   <a class="nav-item" id="link-users" onclick="showTab('users')"><i class="fas fa-microchip"></i>Device Models</a>
   <a class="nav-item" id="link-calendar" onclick="showTab('calendar')"><i class="fas fa-calendar-days"></i>Calendar</a>
-  <div class="nav-section">Records</div>
-  <a class="nav-item" id="link-records" onclick="showTab('records')"><i class="fas fa-database"></i>Drying Records</a>
+  <div class="nav-section">Sessions</div>
+  <a class="nav-item" id="link-records" onclick="showTab('records')"><i class="fas fa-database"></i>Completed Sessions</a>
   <a class="nav-item" id="link-inquiries" onclick="showTab('inquiries')"><i class="fas fa-envelope-open-text"></i>Inquiries</a>
   <div class="sidebar-footer">
     <div class="user-card">
@@ -770,36 +882,6 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 <!-- ═══════════ MAIN ═══════════ -->
 <div class="main">
 
-  <!-- Smart Filter Bar -->
-  <div class="filter-bar" id="globalFilterBar">
-    <span class="filter-label">Filter:</span>
-    <select class="filter-select" id="fBatch" onchange="applyFilters()">
-      <option value="">All Batches</option>
-    </select>
-    <select class="filter-select" id="fSpecies" onchange="applyFilters()">
-      <option value="">All Species</option>
-      <option value="Tilapia">Tilapia</option>
-      <option value="Bangus">Bangus</option>
-      <option value="Galunggong">Galunggong</option>
-      <option value="Tulingan">Tulingan</option>
-    </select>
-    <select class="filter-select" id="fMoisture" onchange="applyFilters()">
-      <option value="">Moisture Level</option>
-      <option value="dry">Dry (≤30%)</option>
-      <option value="medium">Medium (30-60%)</option>
-      <option value="high">High (>60%)</option>
-    </select>
-    <div class="filter-divider"></div>
-    <input type="date" class="filter-date" id="fDateFrom" onchange="applyFilters()" title="Date from">
-    <span style="font-size:11px;color:var(--text-muted)">–</span>
-    <input type="date" class="filter-date" id="fDateTo" onchange="applyFilters()" title="Date to">
-    <input type="text" class="filter-search" id="fSearch" placeholder="Search sessions…" oninput="applyFilters()">
-    <button onclick="clearFilters()" style="background:none;border:none;font-size:11px;color:var(--text-muted);cursor:pointer;font-family:'Mulish',sans-serif;white-space:nowrap;"><i class="fas fa-xmark me-1"></i>Clear</button>
-    <div class="filter-live">
-      <span class="live-dot"></span>System Live
-    </div>
-  </div>
-
   <div class="content-wrap">
 
     <!-- ══════════════════════════ DASHBOARD ══════════════════════════ -->
@@ -809,7 +891,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
           <div class="page-title">📊 Admin Dashboard</div>
           <div class="page-sub">Real-time overview — Smart Fish Drying System</div>
         </div>
-        <button onclick="loadStats();loadDailyTrends();loadAlerts();" class="btn-primary" style="padding:8px 16px;font-size:11px;">
+        <button onclick="loadStats();loadDailyTrends();" class="btn-primary" style="padding:8px 16px;font-size:11px;">
           <i class="fas fa-rotate me-1"></i>Refresh All
         </button>
       </div>
@@ -872,19 +954,11 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
             <div class="stat-accent" style="background:var(--seafoam)"></div>
           </div>
         </div>
-        <div class="col-sm-6 col-xl-3">
-          <div class="stat-card">
-            <div class="stat-icon" style="background:rgba(244,162,97,.1);color:var(--amber)"><i class="fas fa-triangle-exclamation"></i></div>
-            <div class="stat-value" id="statAlerts" style="color:var(--amber)">0</div>
-            <div class="stat-label">Overheat Alerts</div>
-            <div class="stat-accent" style="background:var(--amber)"></div>
-          </div>
-        </div>
       </div>
 
       <div class="row g-3">
         <!-- 14-Day Trend Chart -->
-        <div class="col-lg-8">
+        <div class="col-12">
           <div class="glass-card">
             <div class="card-head">
               <div class="card-title">
@@ -897,26 +971,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
               <div class="legend-label"><span class="legend-dot" style="background:var(--teal)"></span>Avg Temperature</div>
               <div class="legend-label"><span class="legend-dot" style="background:var(--seafoam)"></span>Avg Humidity</div>
             </div>
-            <div class="chart-wrap" style="padding-top:0"><canvas id="trendChart" height="200"></canvas></div>
-          </div>
-        </div>
-
-        <!-- Live Overheat Alerts -->
-        <div class="col-lg-4">
-          <div class="glass-card" style="height:100%;">
-            <div class="card-head">
-              <div class="card-title">
-                <span class="card-title-dot" style="background:var(--terracotta)"></span>
-                Live Overheat Alerts
-              </div>
-              <button onclick="loadAlerts()" class="act-btn act-del" style="padding:4px 9px;font-size:9.5px;"><i class="fas fa-rotate me-1"></i>Scan</button>
-            </div>
-            <div id="alertsPanel" style="padding:0 20px 20px;display:flex;flex-direction:column;">
-              <!-- skeleton -->
-              <div class="skeleton skel-row skel-wide"></div>
-              <div class="skeleton skel-row skel-med"></div>
-              <div class="skeleton skel-row skel-short"></div>
-            </div>
+            <div class="chart-wrap" style="padding-top:0"><canvas id="trendChart" height="130"></canvas></div>
           </div>
         </div>
 
@@ -928,16 +983,16 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
                 <span class="card-title-dot" style="background:var(--teal-light)"></span>
                 Recent Sessions
               </div>
-              <a onclick="showTab('sessions')" style="font-size:11px;color:var(--teal);cursor:pointer;font-weight:700;">View All →</a>
+              <a onclick="showTab('records')" style="font-size:11px;color:var(--teal);cursor:pointer;font-weight:700;">View All →</a>
             </div>
             <div class="section-scroll" style="padding:0 0 16px">
               <table class="data-table">
                 <thead><tr>
                   <th>#ID</th><th>Prototype</th><th>Start Time</th><th>Duration</th>
-                  <th>Targets</th><th>Avg Temp</th><th>Status</th><th>Action</th>
+                  <th>Targets</th><th>Avg Temp</th>
                 </tr></thead>
                 <tbody id="recentSessionsBody">
-                  <tr><td colspan="8" style="text-align:center;padding:28px;color:var(--text-muted)">
+                  <tr><td colspan="6" style="text-align:center;padding:28px;color:var(--text-muted)">
                     <i class="fas fa-spinner fa-spin me-2"></i>Loading…
                   </td></tr>
                 </tbody>
@@ -947,42 +1002,6 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
         </div>
       </div>
     </div><!-- /tab-dashboard -->
-
-    <!-- ══════════════════════════ ALL SESSIONS ══════════════════════════ -->
-    <div id="tab-sessions" class="tab-section">
-      <div class="d-flex align-items-center justify-content-between mb-4">
-        <div>
-          <div class="page-title"><i class="fas fa-fish me-2"></i>Drying Sessions</div>
-          <div class="page-sub">Complete drying session records from all prototypes.</div>
-        </div>
-        <div class="d-flex gap-2">
-          <input type="text" class="search-box" id="sessSearch" placeholder="🔍  Search prototype / status…" oninput="filterSessions()">
-          <button class="btn-primary" style="padding:8px 14px;font-size:11px;" onclick="loadAllSessions()"><i class="fas fa-rotate me-1"></i>Refresh</button>
-        </div>
-      </div>
-      <div class="glass-card">
-        <div class="section-scroll" style="padding:16px">
-          <table class="data-table" id="sessionsTable">
-            <thead><tr>
-              <th>#ID</th><th>Prototype</th><th>Started</th><th>Ended</th><th>Duration</th>
-              <th>Target T°</th><th>Target H%</th><th>Avg Temp</th><th>Avg Hum</th>
-              <th>Logs</th><th>Status</th><th>Actions</th>
-            </tr></thead>
-            <tbody id="allSessionsBody">
-              <tr><td colspan="12" style="text-align:center;padding:32px;color:var(--text-muted)"><i class="fas fa-spinner fa-spin me-2"></i>Loading…</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-      <!-- Session Detail Chart -->
-      <div class="glass-card mt-4" id="sessDetailCard" style="display:none;">
-        <div class="card-head">
-          <div class="card-title" id="sessDetailTitle">Session Detail</div>
-          <button onclick="closeSessDetail()" style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:5px 12px;font-size:10px;font-weight:600;color:var(--text-muted);cursor:pointer;"><i class="fas fa-xmark me-1"></i>Close</button>
-        </div>
-        <div class="chart-wrap"><canvas id="sessDetailChart" height="140"></canvas></div>
-      </div>
-    </div>
 
     <!-- ══════════════════════════ DEVICE MODELS ══════════════════════════ -->
     <div id="tab-users" class="tab-section">
@@ -1038,8 +1057,8 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
     <div id="tab-records" class="tab-section">
       <div class="d-flex align-items-center justify-content-between mb-4">
         <div>
-          <div class="page-title">📋 Drying Records</div>
-          <div class="page-sub">Complete archive of all drying records.</div>
+          <div class="page-title">📋 Completed Sessions</div>
+          <div class="page-sub">Complete archive of all drying sessions.</div>
         </div>
         <button class="btn-primary" style="padding:8px 14px;font-size:11px;" onclick="loadRecords()"><i class="fas fa-rotate me-1"></i>Refresh</button>
       </div>
@@ -1047,11 +1066,11 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
         <div class="section-scroll" style="padding:16px">
           <table class="data-table">
             <thead><tr>
-              <th>#</th><th>Prototype</th><th>Batch ID</th><th>Duration</th>
-              <th>Energy</th><th>Avg Temp</th><th>Avg Hum</th><th>Status</th><th>Timestamp</th>
+              <th>#</th><th>Prototype</th><th>Duration</th>
+            <th>Avg Temp</th><th>Avg Hum</th><th>Status</th><th>Timestamp</th>
             </tr></thead>
             <tbody id="recordsBody">
-              <tr><td colspan="9" style="text-align:center;padding:32px;color:var(--text-muted)"><i class="fas fa-spinner fa-spin me-2"></i>Loading records…</td></tr>
+              <tr><td colspan="7" style="text-align:center;padding:32px;color:var(--text-muted)"><i class="fas fa-spinner fa-spin me-2"></i>Loading sessions…</td></tr>
             </tbody>
           </table>
         </div>
@@ -1064,6 +1083,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
         <div>
           <div class="page-title">✉️ Contact Inquiries</div>
           <div class="page-sub">Messages sent from the landing page "Get Touch With Us" form.</div>
+          <div class="page-sub" id="inqMeta" style="margin-top:2px;font-size:11px;">Checking inquiry source...</div>
         </div>
         <button class="btn-primary" style="padding:8px 14px;font-size:11px;" onclick="loadInquiries()"><i class="fas fa-rotate me-1"></i>Refresh</button>
       </div>
@@ -1086,13 +1106,9 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 
 <!-- ═══════════ QUICK ACTION FAB ═══════════ -->
 <div class="fab-menu" id="fabMenu">
-  <div class="fab-action" onclick="showTab('sessions');loadAllSessions();closeFab();">
-    <div class="fab-action-icon" style="background:rgba(0,119,182,.1);color:var(--teal)"><i class="fas fa-fish"></i></div>
-    View All Sessions
-  </div>
-  <div class="fab-action" onclick="loadAlerts();closeFab();">
-    <div class="fab-action-icon" style="background:rgba(230,57,70,.1);color:var(--terracotta)"><i class="fas fa-triangle-exclamation"></i></div>
-    Check Overheat Alerts
+  <div class="fab-action" onclick="showTab('records');loadRecords();closeFab();">
+    <div class="fab-action-icon" style="background:rgba(0,119,182,.1);color:var(--teal)"><i class="fas fa-database"></i></div>
+    View Completed Sessions
   </div>
   <div class="fab-action" onclick="loadStats();loadDailyTrends();closeFab();">
     <div class="fab-action-icon" style="background:rgba(46,196,182,.1);color:var(--seafoam)"><i class="fas fa-chart-line"></i></div>
@@ -1101,7 +1117,6 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 </div>
 <button class="fab" id="fabBtn" onclick="toggleFab()">
   <i class="fas fa-bolt"></i>
-  <span class="fab-count" id="fabAlertCount" style="display:none">0</span>
 </button>
 
 <!-- ═══════════ DEVICE MODAL ═══════════ -->
@@ -1143,12 +1158,23 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
   </div>
 </div>
 
+<!-- ═══════════ INQUIRY MODAL ═══════════ -->
+<div class="modal-backdrop" id="inquiryModal" style="display:none;" onclick="if(event.target===this)closeInquiryModal()">
+  <div class="modal-panel" style="max-width:680px;width:min(680px,calc(100vw - 24px));">
+    <div class="d-flex align-items-center justify-content-between mb-3">
+      <div class="modal-title" id="inqModalTitle" style="margin-bottom:0">Inquiry Message</div>
+      <button onclick="closeInquiryModal()" style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:5px 11px;font-size:11px;font-weight:600;color:var(--text-muted);cursor:pointer;"><i class="fas fa-xmark"></i></button>
+    </div>
+    <div id="inqModalBody" style="display:flex;flex-direction:column;gap:12px"></div>
+  </div>
+</div>
+
 <script>
 // ════════════════════════════════════════════════════════
 //  STATE & INIT
 // ════════════════════════════════════════════════════════
 let trendChart=null, sessDetailChart=null, adminCal=null;
-let allSessions=[], allPrototypes=[];
+let allPrototypes=[];
 let fabOpen=false;
 
 // Clock
@@ -1163,7 +1189,6 @@ function showTab(tab){
   document.getElementById('tab-'+tab).classList.add('active');
   const lnk=document.getElementById('link-'+tab);
   if(lnk) lnk.classList.add('active');
-  if(tab==='sessions'){ loadAllSessions(); }
   if(tab==='users'){ loadAllPrototypes(); }
   if(tab==='calendar'){ initAdminCalendar(); }
   if(tab==='records'){ loadRecords(); }
@@ -1172,20 +1197,6 @@ function showTab(tab){
 
 function toggleFab(){ fabOpen=!fabOpen; document.getElementById('fabMenu').classList.toggle('open',fabOpen); }
 function closeFab(){ fabOpen=false; document.getElementById('fabMenu').classList.remove('open'); }
-
-// Filter bar actions (visual only; actual filter happens per-tab)
-function applyFilters(){
-  const activeTab=document.querySelector('.tab-section.active');
-  if(activeTab && activeTab.id==='tab-sessions') filterSessions();
-}
-function clearFilters(){
-  ['fBatch','fSpecies','fMoisture','fSearch'].forEach(id=>{
-    const el=document.getElementById(id);
-    if(el){ el.value=''; }
-  });
-  ['fDateFrom','fDateTo'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
-  applyFilters();
-}
 
 // ════════════════════════════════════════════════════════
 //  STATS
@@ -1204,6 +1215,13 @@ async function loadStats(){
     // mock dry count — could be a separate query
     document.getElementById('statDry').textContent=d.completed??'—';
   }catch(e){}
+}
+
+function normalizeScheduleStatus(status){
+  return status === 'Running' ? 'Running' : (status || 'Scheduled');
+}
+function scheduleStatusLabel(status){
+  return status === 'Running' ? 'ONGOING' : (status || 'Scheduled');
 }
 
 // ════════════════════════════════════════════════════════
@@ -1245,135 +1263,11 @@ async function loadDailyTrends(){
   }catch(e){}
 }
 
-// ════════════════════════════════════════════════════════
-//  ALERTS
-// ════════════════════════════════════════════════════════
-async function loadAlerts(){
-  const panel=document.getElementById('alertsPanel');
-  try{
-    const j=await(await fetch('admin_sessions.php?action=get_live_alerts')).json();
-    const data=j.data||[];
-    document.getElementById('statAlerts').textContent=data.length;
-    const fabCount=document.getElementById('fabAlertCount');
-    const fabBtn=document.getElementById('fabBtn');
-    if(data.length>0){
-      fabCount.textContent=data.length;
-      fabCount.style.display='';
-      fabBtn.classList.add('alert-active');
-      badge('badge-sessions','!',true);
-    } else {
-      fabCount.style.display='none';
-      fabBtn.classList.remove('alert-active');
-      badge('badge-sessions','',false);
-    }
-    panel.innerHTML=!data.length
-      ?`<div style="text-align:center;padding:24px 10px;color:var(--text-muted);font-size:12px;">
-          <div style="font-size:28px;margin-bottom:8px;"><i class="fas fa-circle-check" style="color:var(--success)"></i></div>
-          <div style="font-weight:700;color:var(--seafoam)">All Clear</div>
-          <div style="font-size:11px;margin-top:3px;">No overheat alerts detected</div>
-        </div>`
-      :data.map(a=>`
-        <div class="alert-item">
-          <i class="fas fa-fire alert-icon"></i>
-          <div>
-            <div class="alert-msg">Session #${a.session_id} — ${a.username}</div>
-            <div class="alert-sub">Temp: ${a.latest_temp}°C (target: ${a.set_temp}°C)</div>
-          </div>
-          <button onclick="adminStopSession(${a.session_id},'${a.username}')" class="act-btn act-stop" style="margin-left:auto;font-size:9px;padding:4px 9px;white-space:nowrap;"><i class="fas fa-stop me-1"></i>Stop</button>
-        </div>`).join('');
-  }catch(e){ panel.innerHTML='<div style="font-size:12px;color:var(--text-muted);padding:12px;">Could not load alerts.</div>'; }
-}
-
 function badge(id,txt,show){
   const el=document.getElementById(id);
   if(!el) return;
   el.textContent=txt;
   el.style.display=show?'':'none';
-}
-
-// ════════════════════════════════════════════════════════
-//  RECENT SESSIONS
-// ════════════════════════════════════════════════════════
-async function loadRecentSessions(){
-  const body=document.getElementById('recentSessionsBody');
-  try{
-    const j=await(await fetch('admin_sessions.php?action=get_all_sessions_admin')).json();
-    if(j.status!=='success'||!j.data.length){
-      body.innerHTML=noDataRow(8); return;
-    }
-    const rows=j.data.slice(0,10);
-    body.innerHTML=rows.map(s=>`
-      <tr>
-        <td class="mono" style="color:var(--teal)">#${s.session_id}</td>
-        <td style="font-weight:600">${s.username}</td>
-        <td style="font-size:11.5px;color:var(--text-muted)">${s.start_time?.slice(0,16)||'—'}</td>
-        <td class="mono" style="font-size:11px">${s.duration?.slice(0,8)||'—'}</td>
-        <td style="font-size:11.5px">${s.set_temp}°C / ${s.set_humidity}%</td>
-        <td style="font-weight:600;color:${parseFloat(s.avg_temp)>40?'var(--terracotta)':'var(--text-primary)'}">${s.avg_temp?parseFloat(s.avg_temp).toFixed(1)+'°C':'—'}</td>
-        <td><span class="pill pill-${s.status}">${s.status}</span></td>
-        <td>
-          <div class="d-flex gap-1">
-            <button onclick="viewSessDetail(${s.session_id})" class="act-btn act-view">Detail</button>
-            ${s.status==='Running'?`<button onclick="adminStopSession(${s.session_id},'${s.username}')" class="act-btn act-stop">Stop</button>`:''}
-          </div>
-        </td>
-      </tr>`).join('');
-  }catch(e){ body.innerHTML=noDataRow(8); }
-}
-
-// ════════════════════════════════════════════════════════
-//  ALL SESSIONS
-// ════════════════════════════════════════════════════════
-async function loadAllSessions(){
-  const body=document.getElementById('allSessionsBody');
-  body.innerHTML=`<tr><td colspan="12" style="text-align:center;padding:32px;color:var(--text-muted)">
-    <div style="display:flex;flex-direction:column;gap:8px;max-width:400px;margin:0 auto;">
-      <div class="skeleton skel-row skel-wide"></div>
-      <div class="skeleton skel-row skel-med"></div>
-      <div class="skeleton skel-row skel-wide"></div>
-    </div>
-  </td></tr>`;
-  try{
-    const j=await(await fetch('admin_sessions.php?action=get_all_sessions_admin')).json();
-    allSessions=j.data||[];
-    renderSessions(allSessions);
-  }catch(e){ body.innerHTML=noDataRow(12); }
-}
-function renderSessions(data){
-  const body=document.getElementById('allSessionsBody');
-  if(!data.length){ body.innerHTML=noDataRow(12); return; }
-  body.innerHTML=data.map(s=>`
-    <tr>
-      <td class="mono" style="color:var(--teal)">#${s.session_id}</td>
-      <td style="font-weight:600">${s.username}</td>
-      <td style="font-size:11px;color:var(--text-muted)">${s.start_time?.slice(0,16)||'—'}</td>
-      <td style="font-size:11px;color:var(--text-muted)">${s.end_time?.slice(0,16)||'—'}</td>
-      <td class="mono" style="font-size:11px">${s.duration?.slice(0,8)||'—'}</td>
-      <td>${s.set_temp}°C</td>
-      <td>${s.set_humidity}%</td>
-      <td style="font-weight:600;color:${parseFloat(s.avg_temp)>40?'var(--terracotta)':'var(--text-primary)'}">${s.avg_temp?parseFloat(s.avg_temp).toFixed(1)+'°C':'—'}</td>
-      <td style="color:var(--teal)">${s.avg_hum?parseFloat(s.avg_hum).toFixed(1)+'%':'—'}</td>
-      <td class="mono">${s.total_logs||0}</td>
-      <td><span class="pill pill-${s.status}">${s.status}</span></td>
-      <td>
-        <div class="d-flex gap-1 flex-wrap">
-          <button onclick="viewSessDetail(${s.session_id})" class="act-btn act-view">Detail</button>
-          ${s.status==='Running'?`<button onclick="adminStopSession(${s.session_id},'${s.username}')" class="act-btn act-stop">Stop</button>`:''}
-        </div>
-      </td>
-    </tr>`).join('');
-}
-function filterSessions(){
-  const q=(document.getElementById('sessSearch')?.value||'').toLowerCase();
-  const fSearch=(document.getElementById('fSearch')?.value||'').toLowerCase();
-  const combined=q||fSearch;
-  const fDateFrom=document.getElementById('fDateFrom')?.value||'';
-  const fDateTo=document.getElementById('fDateTo')?.value||'';
-  let d=[...allSessions];
-  if(combined) d=d.filter(s=>(s.username||'').toLowerCase().includes(combined)||(s.status||'').toLowerCase().includes(combined));
-  if(fDateFrom) d=d.filter(s=>s.start_time&&s.start_time.slice(0,10)>=fDateFrom);
-  if(fDateTo) d=d.filter(s=>s.start_time&&s.start_time.slice(0,10)<=fDateTo);
-  renderSessions(d);
 }
 
 // Session Detail
@@ -1406,9 +1300,9 @@ async function viewSessDetail(sid){
 }
 function closeSessDetail(){document.getElementById('sessDetailCard').style.display='none';}
 
-async function adminStopSession(sid,username){
+async function adminStopSession(sid,deviceLabel){
   const r=await Swal.fire({
-    title:`Stop Session #${sid}?`,text:`This will mark ${username}'s session as Completed.`,
+    title:`Stop Session #${sid}?`,text:`This will mark ${deviceLabel}'s session as Completed.`,
     icon:'warning',showCancelButton:true,confirmButtonColor:'#E63946',confirmButtonText:'Stop Session',
     background:'#fff',color:'#0D1B2A',customClass:{popup:'swal-clean'}
   });
@@ -1416,9 +1310,66 @@ async function adminStopSession(sid,username){
   const fd=new FormData(); fd.append('action','stop_session'); fd.append('session_id',sid);
   try{
     const j=await(await fetch('admin_sessions.php',{method:'POST',body:fd})).json();
-    if(j.status==='success'){ loadAllSessions(); loadRecentSessions(); loadAlerts(); loadStats(); showToast('success','Session Stopped',j.message,3000); }
+    if(j.status==='success'){ loadRecentSessions(); loadStats(); if(document.getElementById('tab-records')?.classList.contains('active')) loadRecords(); showToast('success','Session Stopped',j.message,3000); }
     else showToast('warning','Error',j.message||'Failed.',3000);
   }catch(e){ showToast('warning','Network Error','Could not reach server.',3000); }
+}
+
+// ════════════════════════════════════════════════════════
+//  RECENT SESSIONS
+// ════════════════════════════════════════════════════════
+async function loadRecentSessions(){
+  const body=document.getElementById('recentSessionsBody');
+  if(!body) return;
+
+  body.innerHTML=`<tr><td colspan="6" style="text-align:center;padding:28px;color:var(--text-muted)"><i class="fas fa-spinner fa-spin me-2"></i>Loading...</td></tr>`;
+
+  try{
+    // Use the same dataset as Completed Sessions to keep both tables consistent.
+    const r=await fetch('admin_sessions.php?action=fetch_all_records');
+    const j=await r.json();
+    const rows = j.records || j.data;
+    if(j.status!=='success' || !Array.isArray(rows)){
+      body.innerHTML=noDataRow(6);
+      return;
+    }
+
+    // Show latest 10 completed records on dashboard (same source as Completed Sessions).
+    const sessions=rows.slice(0,10);
+
+    if(!sessions.length){
+      body.innerHTML=noDataRow(6);
+      return;
+    }
+
+    const formatDateTime=(v)=>{
+      if(!v) return '—';
+      const d=new Date(v.replace(' ','T'));
+      if(Number.isNaN(d.getTime())) return v;
+      return d.toLocaleString('en-PH',{
+        year:'numeric', month:'2-digit', day:'2-digit',
+        hour:'2-digit', minute:'2-digit', hour12:false
+      });
+    };
+
+    body.innerHTML=sessions.map(s=>{
+      const label = (s.prototype_model || 'Fishda') + ` (${s.prototype_code || 'FD2026'})`;
+      const avgTemp = parseFloat(s.temp_avg || 0);
+      const avgTempText = avgTemp > 0 ? `${avgTemp.toFixed(1)}°C` : '—';
+
+      return `
+        <tr>
+          <td class="mono" style="color:var(--teal)">#${s.session_id}</td>
+          <td style="font-weight:700">${label}</td>
+          <td style="font-size:11px;color:var(--text-muted)">${formatDateTime(s.timestamp)}</td>
+          <td class="mono" style="font-size:11px">${s.duration || '—'}</td>
+          <td style="font-size:11px;font-weight:600">${s.set_temp ?? '—'}°C / ${s.set_humidity ?? '—'}%</td>
+          <td style="font-weight:700;color:var(--amber)">${avgTempText}</td>
+        </tr>`;
+    }).join('');
+  }catch(e){
+    body.innerHTML=noDataRow(6);
+  }
 }
 
 // ════════════════════════════════════════════════════════
@@ -1428,7 +1379,7 @@ async function loadAllPrototypes(){
   const body=document.getElementById('prototypesBody');
   body.innerHTML=`<tr><td colspan="5" style="text-align:center;padding:28px;color:var(--text-muted)"><i class="fas fa-spinner fa-spin me-2"></i></td></tr>`;
   try{
-    const j=await(await fetch('admin_sessions.php?action=get_all_prototypes')).json();
+    const j=await(await fetch(`admin_sessions.php?action=get_all_prototypes&t=${Date.now()}`)).json();
     allPrototypes=j.data||[];
     renderPrototypes(allPrototypes);
   }catch(e){ body.innerHTML=noDataRow(5); }
@@ -1494,7 +1445,16 @@ async function togglePrototypeStatus(uid,model){
   const fd=new FormData(); fd.append('action','toggle_prototype_status'); fd.append('proto_id',uid);
   try{
     const j=await(await fetch('admin_sessions.php',{method:'POST',body:fd})).json();
-    if(j.status==='success'){ loadAllPrototypes(); showToast('success','Updated',j.message,3000); }
+    if(j.status==='success'){
+      if (Object.prototype.hasOwnProperty.call(j, 'new_status')) {
+        allPrototypes = (allPrototypes || []).map(p =>
+          Number(p.id) === Number(uid) ? { ...p, status: Number(j.new_status) } : p
+        );
+        renderPrototypes(allPrototypes);
+      }
+      loadAllPrototypes();
+      showToast('success','Updated',j.message,3000);
+    }
     else showToast('warning','Error',j.message||'Failed.',3000);
   }catch(e){ showToast('warning','Network Error','Could not reach server.',3000); }
 }
@@ -1519,7 +1479,7 @@ async function initAdminCalendar(){
     headerToolbar:{left:'prev,next today',center:'title',right:'dayGridMonth,timeGridWeek,listMonth'},
     height:500,nowIndicator:true,
     events:async(info,success,failure)=>{
-      try{ const r=await fetch('admin_sessions.php?action=get_calendar_events'); const j=await r.json(); success(j.status==='success'?j.data:[]); }
+      try{ const r=await fetch(`admin_sessions.php?action=get_calendar_events&t=${Date.now()}`); const j=await r.json(); success(j.status==='success'?j.data:[]); }
       catch(e){ failure(e); }
     },
     eventClick:(info)=>showEventModal(info.event)
@@ -1529,7 +1489,7 @@ async function initAdminCalendar(){
 }
 async function loadAdminSchedules(){
   try{
-    const r=await fetch('admin_sessions.php?action=get_all_schedules');
+    const r=await fetch(`admin_sessions.php?action=get_all_schedules&t=${Date.now()}`);
     const j=await r.json();
     const body=document.getElementById('adminSchedulesBody');
     if(j.status!=='success'){ body.innerHTML=noDataRow(5); return; }
@@ -1537,11 +1497,11 @@ async function loadAdminSchedules(){
       ?noDataRow(5)
       :j.data.map(s=>`
         <tr>
-          <td style="font-weight:700;color:var(--teal)">${s.username}</td>
+          <td style="font-weight:700;color:var(--teal)">${s.prototype_label || '—'}</td>
           <td style="font-weight:600">${s.title}</td>
           <td style="font-size:10.5px;color:var(--text-muted)">${s.sched_date} ${s.sched_time.slice(0,5)}</td>
           <td style="font-size:11px;font-weight:600">${s.set_temp}°C / ${s.set_humidity}%</td>
-          <td><span class="pill pill-${s.status}">${s.status}</span></td>
+          <td><span class="pill pill-${normalizeScheduleStatus(s.display_status || s.status)}">${scheduleStatusLabel(s.display_status || s.status)}</span></td>
         </tr>`).join('');
   }catch(e){ document.getElementById('adminSchedulesBody').innerHTML=noDataRow(5); }
 }
@@ -1551,10 +1511,12 @@ function showEventModal(event){
   const evRow=(lbl,val)=>`<div class="evt-row"><span class="evt-lbl">${lbl}</span><span class="evt-val">${val}</span></div>`;
   let html='',actions='';
   if(p.type==='schedule'){
-    html=evRow('User',p.username)+evRow('Date/Time',event.startStr?.slice(0,16).replace('T',' '))+evRow('Targets',`${p.set_temp}°C / ${p.set_humidity}%`)+`<div class="evt-row"><span class="evt-lbl">Status</span><span class="pill pill-${p.status}">${p.status}</span></div>`;
+    const normalizedStatus=normalizeScheduleStatus(p.status);
+    html=evRow('Device Model',p.prototype_label || '—')+evRow('Date/Time',event.startStr?.slice(0,16).replace('T',' '))+evRow('Targets',`${p.set_temp}°C / ${p.set_humidity}%`)+`<div class="evt-row"><span class="evt-lbl">Status</span><span class="pill pill-${normalizedStatus}">${scheduleStatusLabel(p.status)}</span></div>`;
+    actions='';
   } else {
-    html=evRow('Session #',`<span class="mono" style="color:var(--teal)">#${p.session_id}</span>`)+evRow('User',p.username)+evRow('Start',event.startStr?.slice(0,16).replace('T',' '))+evRow('End',p.end_time?.slice(0,16)||'—')+`<div class="evt-row"><span class="evt-lbl">Status</span><span class="pill pill-${p.status}">${p.status}</span></div>`;
-    if(p.status==='Running') actions=`<button onclick="adminStopSession(${p.session_id},'${p.username}');closeEventModal()" class="btn-danger" style="width:100%;margin-top:8px;"><i class="fas fa-stop me-2"></i>Force Stop Session</button>`;
+    html=evRow('Session #',`<span class="mono" style="color:var(--teal)">#${p.session_id}</span>`)+evRow('Device Model',p.prototype_label || '—')+evRow('Start',event.startStr?.slice(0,16).replace('T',' '))+evRow('End',p.end_time?.slice(0,16)||'—')+`<div class="evt-row"><span class="evt-lbl">Status</span><span class="pill pill-${p.status}">${p.status}</span></div>`;
+    if(p.status==='Running') actions=`<button onclick="adminStopSession(${p.session_id},'${(p.prototype_label||'Prototype').replace(/'/g, "\\'")}');closeEventModal()" class="btn-danger" style="width:100%;margin-top:8px;"><i class="fas fa-stop me-2"></i>Force Stop Session</button>`;
   }
   document.getElementById('evtModalBody').innerHTML=html;
   document.getElementById('evtModalActions').innerHTML=actions;
@@ -1566,7 +1528,7 @@ function closeEventModal(){ document.getElementById('eventModal').style.display=
 //  RECORDS
 // ════════════════════════════════════════════════════════
 async function loadRecords(){
-  document.getElementById('recordsBody').innerHTML=`<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--text-muted)"><i class="fas fa-spinner fa-spin me-2"></i>Loading records…</td></tr>`;
+  document.getElementById('recordsBody').innerHTML=`<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--text-muted)"><i class="fas fa-spinner fa-spin me-2"></i>Loading sessions…</td></tr>`;
   try{
     const r=await fetch('admin_sessions.php?action=fetch_all_records');
     const j=await r.json();
@@ -1575,20 +1537,18 @@ async function loadRecords(){
       document.getElementById('recordsBody').innerHTML=recs.map(rec=>`
         <tr>
           <td class="mono" style="color:var(--teal)">#${rec.id}</td>
-          <td style="font-weight:700">${rec.username||'—'}</td>
-          <td class="mono" style="font-size:11px;color:var(--text-muted)">${rec.batch_id||'—'}</td>
+          <td style="font-weight:700">${(rec.prototype_model||'Fishda')} (${rec.prototype_code||'FD2026'})</td>
           <td class="mono" style="font-size:11px">${rec.duration||'—'}</td>
-          <td>${rec.energy||0}W</td>
           <td style="font-weight:600;color:var(--amber)">${parseFloat(rec.temp_avg)>0?parseFloat(rec.temp_avg).toFixed(1)+'°C':'—'}</td>
           <td style="font-weight:600;color:var(--teal)">${parseFloat(rec.hum_avg)>0?parseFloat(rec.hum_avg).toFixed(1)+'%':'—'}</td>
           <td><span class="pill ${rec.status&&rec.status.includes('Dried')?'pill-Completed':'pill-Running'}">${rec.status||'Completed'}</span></td>
           <td style="font-size:11px;color:var(--text-muted)">${rec.timestamp||'—'}</td>
         </tr>`).join('');
     } else {
-      document.getElementById('recordsBody').innerHTML=`<tr><td colspan="9" style="text-align:center;padding:48px;color:var(--text-muted)">
+      document.getElementById('recordsBody').innerHTML=`<tr><td colspan="7" style="text-align:center;padding:48px;color:var(--text-muted)">
         <div style="font-size:28px;margin-bottom:10px">📋</div>
-        <div style="font-size:13px;font-weight:700;color:var(--text-primary)">No drying records yet</div>
-        <div style="font-size:11.5px;margin-top:4px">Records appear here once users complete drying sessions.</div>
+        <div style="font-size:13px;font-weight:700;color:var(--text-primary)">No completed sessions yet</div>
+        <div style="font-size:11.5px;margin-top:4px">Sessions appear here once drying cycles are completed.</div>
       </td></tr>`;
     }
   }catch(e){ document.getElementById('recordsBody').innerHTML=noDataRow(9); }
@@ -1599,22 +1559,23 @@ async function loadRecords(){
 // ════════════════════════════════════════════════════════
 async function loadInquiries(){
   const body = document.getElementById('inquiriesBody');
+  const meta = document.getElementById('inqMeta');
   if(!body) return;
   body.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--text-muted)"><i class="fas fa-spinner fa-spin me-2"></i>Loading inquiries…</td></tr>`;
   try {
-    const r = await fetch('admin_sessions.php?action=get_inquiries');
+    const r = await fetch(`admin_sessions.php?action=get_inquiries&t=${Date.now()}`);
     const j = await r.json();
-    if (j.status !== 'success') {
-      body.innerHTML = noDataRow(7);
-      return;
-    }
-
     const rows = j.data || [];
+    if (meta) {
+      const totalText = `Total: ${Number.isFinite(j.total) ? j.total : rows.length}`;
+      const dbText = j.source_db ? ` | Source DB: ${j.source_db}` : '';
+      meta.textContent = `${totalText}${dbText}`;
+    }
     if (!rows.length) {
       body.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:48px;color:var(--text-muted)">
         <div style="font-size:28px;margin-bottom:10px"><i class="fas fa-envelope-open-text"></i></div>
         <div style="font-size:13px;font-weight:700;color:var(--text-primary)">No inquiries yet</div>
-        <div style="font-size:11.5px;margin-top:4px">Landing page messages will appear here.</div>
+        <div style="font-size:11.5px;margin-top:4px">Landing page contact us messages will appear here.</div>
       </td></tr>`;
       return;
     }
@@ -1624,7 +1585,16 @@ async function loadInquiries(){
         <td class="mono" style="color:var(--teal)">#${row.id}</td>
         <td style="font-weight:700">${escapeHtml(row.name || '—')}</td>
         <td style="font-size:11px;color:var(--text-muted)">${escapeHtml(row.contact || '—')}</td>
-        <td style="max-width:360px;white-space:normal;line-height:1.5;">${escapeHtml(row.message || '—')}</td>
+        <td style="max-width:360px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.5;">
+          <button type="button" class="act-btn act-view" onclick="viewInquiryMessage(this.dataset.inquiry)" data-inquiry="${encodeURIComponent(JSON.stringify({
+            id: row.id,
+            name: row.name || '—',
+            contact: row.contact || '—',
+            message: row.message || '—',
+            status: row.status || 'pending',
+            created_at: row.created_at || '—'
+          }))}">View Message</button>
+        </td>
         <td><span class="pill pill-${row.status === 'pending' ? 'Running' : 'Completed'}">${escapeHtml(row.status || 'pending')}</span></td>
         <td style="font-size:11px;color:var(--text-muted)">${escapeHtml((row.created_at || '').slice(0,16).replace('T',' ') || '—')}</td>
         <td>
@@ -1636,10 +1606,33 @@ async function loadInquiries(){
       </tr>
     `).join('');
   } catch (e) {
+    if (meta) meta.textContent = 'Could not load inquiry source.';
     body.innerHTML = noDataRow(7);
   }
 }
 
+
+  function viewInquiryMessage(encodedInquiry){
+    const data = JSON.parse(decodeURIComponent(encodedInquiry));
+    const safeName = escapeHtml(data.name || '—');
+    const safeContact = escapeHtml(data.contact || '—');
+    const safeStatus = escapeHtml(data.status || 'pending');
+    const safeDate = escapeHtml((data.created_at || '—').toString().slice(0,16).replace('T',' ') || '—');
+    const safeMessage = escapeHtml(data.message || '—').replace(/\n/g, '<br>');
+
+    document.getElementById('inqModalTitle').textContent = `Inquiry #${data.id || '—'}`;
+    document.getElementById('inqModalBody').innerHTML = `
+      <div class="evt-row"><span class="evt-lbl">Name</span><span class="evt-val">${safeName}</span></div>
+      <div class="evt-row"><span class="evt-lbl">Contact</span><span class="evt-val">${safeContact}</span></div>
+      <div class="evt-row"><span class="evt-lbl">Status</span><span class="pill pill-${data.status === 'pending' ? 'Running' : 'Completed'}">${safeStatus}</span></div>
+      <div class="evt-row"><span class="evt-lbl">Sent</span><span class="evt-val">${safeDate}</span></div>
+      <div class="evt-row"><span class="evt-lbl">Message</span></div>
+      <div style="margin-top:4px;padding:14px 15px;border:1px solid var(--border);border-radius:12px;background:var(--surface-2);color:var(--text-primary);line-height:1.7;white-space:normal;word-break:break-word;">${safeMessage}</div>
+    `;
+    document.getElementById('inquiryModal').style.display='flex';
+  }
+
+  function closeInquiryModal(){ document.getElementById('inquiryModal').style.display='none'; }
 async function markInquiryStatus(inquiryId, status){
   const fd = new FormData();
   fd.append('action', 'mark_inquiry_status');
@@ -1696,8 +1689,7 @@ function logoutAdmin(){
 loadStats();
 loadDailyTrends();
 loadRecentSessions();
-loadAlerts();
-setInterval(()=>{ loadAlerts(); loadStats(); },30000);
+setInterval(()=>{ loadStats(); },30000);
 </script>
 </body>
 </html>
