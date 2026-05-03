@@ -201,16 +201,33 @@ body {
 }
 
 /* ── PAGE LAYOUT ── */
+
+/* --- FLEX LAYOUT FOR FULL WINDOW --- */
 .page-wrap {
-    position: relative; 
+    position: relative;
     z-index: 10;
-    width: 100%;
-    max-width: 1160px;
-    margin: 0 auto;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(360px, 420px);
-    gap: 28px;
-    align-items: start;
+    width: 100vw;
+    height: 100vh;
+    margin: 0;
+    display: flex;
+    flex-direction: row;
+    gap: 36px; /* Adjust this value for more/less space */
+    align-items: stretch;
+    justify-content: stretch;
+}
+
+/* Make info-side 60% and login-side 40% */
+.info-side {
+    flex: 0 1 70%;
+    min-width: 0;
+    min-height: 100vh;
+    box-sizing: border-box;
+}
+.login-side {
+    flex: 0 1 30%;
+    min-width: 0;
+    min-height: 100vh;
+    box-sizing: border-box;
 }
 
 /* Left content */
@@ -302,6 +319,7 @@ body {
     color: rgba(255,255,255,0.86);
     line-height: 1.6;
     font-size: 1rem;
+    text-align: justify;
 }
 
 .contact-card {
@@ -321,6 +339,7 @@ body {
     color: rgba(255,255,255,0.7);
     font-size: 0.82rem;
     margin-bottom: 12px;
+    text-align: justify;
 }
 
 .contact-grid {
@@ -667,6 +686,7 @@ body {
     line-height: 1.6;
     max-width: 440px;
     margin-bottom: 20px;
+    text-align: justify;
 }
 
 /* Feature chips */
@@ -1201,10 +1221,17 @@ body {
 }
 
 /* ── RESPONSIVE ── */
-@media (max-width: 500px) {
-    .page-wrap { 
-        max-width: 100%; 
-        display: block;
+@media (max-width: 900px) {
+    .page-wrap {
+        flex-direction: column;
+        width: 100vw;
+        height: auto;
+        min-height: 100vh;
+    }
+    .info-side, .login-side {
+        min-height: unset;
+        width: 100vw;
+        flex: unset;
     }
     .info-side {
         margin-bottom: 16px;
@@ -1218,6 +1245,7 @@ body {
     }
     .login-card {
         padding: 30px 22px;
+        margin-bottom: 18px;
     }
     .circuit-icon {
         width: 60px;
@@ -1274,7 +1302,7 @@ body {
                 SYSTEM ONLINE
             </div>
             <h1 class="sys-title">Automated <span>Fish Dryer</span></h1>
-            <div class="sys-sub">IoT MONITORING & CONTROL PLATFORM</div>
+            <div class="sys-sub">Smart Fish Drying System – Efficient, Hygienic, and Fully Automated</div>
 
             <div class="hero-nav">
                 <button type="button" class="hero-link active" data-target="homePanel">Home</button>
@@ -1283,18 +1311,50 @@ body {
         </div>
 
         <div class="main-content hero-panel active" id="homePanel">
+
             <div class="hero-gallery">
-                <div class="hero-shot">
-                    <img src="3d.jpg" alt="Fish dryer prototype view" onerror="this.style.display='none';this.nextElementSibling.style.display='grid';">
-                    <div class="hero-shot-fallback" style="display:none;">PROTOTYPE VIEW A</div>
+                <div class="hero-shot" style="display: flex; gap: 24px;">
+                    <div style="flex:1; min-width:0; display:flex; align-items:center; justify-content:center;">
+                        <img src="2.jpg" alt="Fish dryer prototype view" style="width:100%; height:100%; object-fit:cover; border-radius: 24px;" onerror="this.style.display='none';this.parentElement.nextElementSibling.querySelector('.hero-shot-fallback').style.display='grid';">
+                    </div>
+                    <div style="flex:1; min-width:0; display:flex; align-items:center; justify-content:center;">
+                        <img src="3.jpg" alt="Fish dryer prototype view" style="width:100%; height:100%; object-fit:cover; border-radius: 24px;" onerror="this.style.display='none';this.nextElementSibling.style.display='grid';">
+                        <div class="hero-shot-fallback" style="display:none;">PROTOTYPE VIEW A</div>
+                    </div>
                 </div>
             </div>
 
             <p class="home-copy">
-                Welcome to the Automated Fish Dryer Prototype Management System, a centralized platform for real-time monitoring,
-                control, and data logging of registered IoT prototypes. Each unit is uniquely identified by model name and access code,
-                allowing seamless and secure session access.
+
+
+Upgrade your fish drying process with our innovative Smart Fish Drying System, designed to deliver consistent, high-quality results while reducing manual effort.
+
+This advanced prototype features real-time monitoring through a web-based platform, allowing you to track drying conditions anytime, anywhere. With its automated temperature control and customizable scheduling, you can ensure optimal drying conditions for different types of fish, improving product quality and reducing waste.
+
+Built with durable fiber cloth material, the system provides a clean and hygienic drying environment, protecting your products from contaminants. It is equipped with a high-performance fan and efficient heating system that work together to maintain stable airflow and temperature, resulting in faster and more uniform drying.
+
+Whether you are a small-scale producer or expanding your operations, this system offers:
+
+            
             </p>
+            <p class="home-copy">
+
+Whether you are a small-scale producer or expanding your operations, this system offers:
+
+<ul style="margin: 0 0 1.2em 1.2em; padding: 0; color: var(--text-dim); font-size: 1rem; line-height: 1.7;">
+    <li>Precise temperature management for consistent results</li>
+    <li>Convenient web-based control and monitoring</li>
+    <li>Flexible drying schedules to fit your workflow</li>
+    <li>Improved hygiene and product safety</li>
+    <li>Reliable performance and durability</li>
+</ul>
+
+Transform your traditional drying method into a smart, efficient, and modern solution—and deliver better quality dried fish to your customers every time.
+    
+
+            </p>
+    
+
         </div>
 
         <div class="main-content hero-panel" id="contactPanel">
@@ -1327,16 +1387,12 @@ body {
         
         <!-- System Header -->
         <div class="system-header">
-            <div class="sys-badge-top">
-                <span class="pulse-dot"></span>
-                SYSTEM ONLINE
-            </div>
-            <h1 class="system-title">Automated <span>Prototype</span> System</h1>
+
         </div>
 
         <div class="login-card">
 
-            <div class="card-corner">v2.0 // APS</div>
+            <div class="card-corner"></div>
 
             <div class="login-head">
                 <div class="circuit-icon">
@@ -1373,9 +1429,9 @@ body {
                     <div class="f-wrap">
                         <i class="fas fa-cube f-icon"></i>
                         <input type="text" name="model_name" id="modelName" class="f-input"
-                               placeholder="e.g. Fishda" required autocomplete="off">
+                               placeholder=" " required autocomplete="off">
                     </div>
-                    <div class="f-hint">// enter the registered unit or model identity</div>
+                    <div class="f-hint">enter the registered unit or model identity</div>
                 </div>
 
                 <div class="f-group">
@@ -1383,9 +1439,9 @@ body {
                     <div class="f-wrap">
                         <i class="fas fa-key f-icon"></i>
                         <input type="text" name="code" id="givenCode" class="f-input"
-                               placeholder="e.g. FD2026" required autocomplete="off">
+                               placeholder=" " required autocomplete="off">
                     </div>
-                    <div class="f-hint">// unique code assigned by administrator</div>
+                    <div class="f-hint">enter the given code</div>
                 </div>
 
                 <hr class="f-divider">
@@ -1402,28 +1458,13 @@ body {
             </form>
 
             <div class="card-footer-note">
-                No access yet? Contact administrator to register<br>
-                <a href="#">Automated Prototype System &copy; <?= date('Y') ?></a>
+            PADAYON<br>
+                <a href="#">BSIT.NETWORKING.SECURITY &copy; <?= date('Y') ?></a>
             </div>
         </div>
 
         <!-- Contact Info -->
-        <div class="contact-info-bottom">
-            <div class="contact-title">
-                <i class="fas fa-headset"></i>
-                Need Help?
-            </div>
-            <div class="contact-list">
-                <div class="contact-item-bottom">
-                    <i class="fas fa-phone"></i>
-                    <span>+63 912 345 6789</span>
-                </div>
-                <div class="contact-item-bottom">
-                    <i class="fas fa-envelope"></i>
-                    <span>admin@protoautosys.edu.ph</span>
-                </div>
-            </div>
-        </div>
+        
 
     </div>
 

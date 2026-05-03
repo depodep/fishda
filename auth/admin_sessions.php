@@ -848,7 +848,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
   <div class="sidebar-frost"></div>
   <div class="sidebar-brand">
     <div class="d-flex align-items-center gap-3 mb-1">
-      <img src="../assets/fishlogo.jpg" alt="Logo" class="brand-logo" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2248%22 height=%2248%22><rect width=%2248%22 height=%2248%22 rx=%2212%22 fill=%22%23002147%22/><text x=%2224%22 y=%2231%22 text-anchor=%22middle%22 fill=%22%2200CCFF%22 font-size=%2224%22>🐟</text></svg>'">>
+      <img src="../assets/fishda.jpg" alt="Logo" class="brand-logo" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2248%22 height=%2248%22><rect width=%2248%22 height=%2248%22 rx=%2212%22 fill=%22%23002147%22/><text x=%2224%22 y=%2２31%2２ text-anchor=%2２middle%2２ fill=%2２%2200CCFF%2２ font-size=%2２ twenty-four% twenty-four>🐟</text></svg>'">>
       <div>
         <div class="brand-title">Smart Fish Drying</div>
         <div class="brand-sub">Control Center</div>
@@ -861,7 +861,6 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
   <a class="nav-item active" id="link-dashboard" onclick="showTab('dashboard')"><i class="fas fa-chart-pie"></i>Dashboard</a>
   <div class="nav-section">Management</div>
   <a class="nav-item" id="link-users" onclick="showTab('users')"><i class="fas fa-microchip"></i>Device Models</a>
-  <a class="nav-item" id="link-calendar" onclick="showTab('calendar')"><i class="fas fa-calendar-days"></i>Calendar</a>
   <div class="nav-section">Sessions</div>
   <a class="nav-item" id="link-records" onclick="showTab('records')"><i class="fas fa-database"></i>Completed Sessions</a>
   <a class="nav-item" id="link-inquiries" onclick="showTab('inquiries')"><i class="fas fa-envelope-open-text"></i>Inquiries</a>
@@ -1190,7 +1189,6 @@ function showTab(tab){
   const lnk=document.getElementById('link-'+tab);
   if(lnk) lnk.classList.add('active');
   if(tab==='users'){ loadAllPrototypes(); }
-  if(tab==='calendar'){ initAdminCalendar(); }
   if(tab==='records'){ loadRecords(); }
   if(tab==='inquiries'){ loadInquiries(); }
 }

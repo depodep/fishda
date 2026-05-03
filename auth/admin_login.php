@@ -128,8 +128,7 @@ body{
 <body class="fish-auth">
   <div class="card">
     <h1 class="title">Admin Login</h1>
-    <p class="sub">USERNAME + PASSWORD REQUIRED</p>
-
+ 
     <form id="adminForm" autocomplete="off">
       <input type="hidden" name="action" value="admin_login">
 
