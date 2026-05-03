@@ -519,6 +519,26 @@ switch ($action) {
                 $fan2_state = 1;
                 $phase      = 'Drying';
             }
+
+            // Target reached in normal drying range: start 5-minute cooldown cycle.
+            // ESP already supports command='COOLDOWN', so this server-side update is enough.
+            if (!$auto_stopped && $ctrl_status !== 'COOLDOWN' && $phase === 'Drying' && $recorded_temp >= $target_temp) {
+                $cooldown_until = date('Y-m-d H:i:s', time() + 300);
+                try {
+                    $dbh->prepare("UPDATE drying_controls SET status='COOLDOWN', cooldown_until=:until WHERE id=1")
+                        ->execute([':until' => $cooldown_until]);
+                } catch (Exception $e) {
+                    // Non-fatal: keep control response consistent even if DB write fails.
+                }
+
+                $ctrl_status = 'COOLDOWN';
+                $cooldown_remaining = 300;
+                $phase = 'Cooldown';
+                $fan1_state = 0;
+                $fan2_state = 0;
+                $command = 'COOLDOWN';
+                $fish_ready = true;
+            }
         }
 
         if (!$auto_stopped) {
