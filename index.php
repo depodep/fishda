@@ -11,6 +11,18 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 include('database/dbcon.php');
+// ─── SESSION GUARD: Redirect logged-in users to their dashboard ───
+if (isset($_SESSION['username']) && $_SESSION['permission'] === 'admin') {
+    // Admin is already logged in
+    header('Location: admin/admin_sessions.php');
+    exit;
+}
+
+if (isset($_SESSION['proto_id']) || (isset($_SESSION['model_name']) && isset($_SESSION['given_code']))) {
+    // Prototype user is already logged in
+    header('Location: prototype/users_dashboard.php');
+    exit;
+}
 
 // ─── INQUIRY HANDLER ─────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'send_inquiry') {
@@ -95,7 +107,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'login
         $_SESSION['model_name']  = $proto->model_name;
         $_SESSION['given_code']  = $proto->given_code;
         $basePath = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '')), '/');
-        $redirectPath = ($basePath !== '' ? $basePath : '') . '/admin/users_dashboard.php';
+        $redirectPath = ($basePath !== '' ? $basePath : '') . '/prototype/users_dashboard.php';
         session_write_close();
         echo json_encode([
             'status' => 'success',
@@ -1016,11 +1028,24 @@ body {
     color: var(--txt);
     font-family: 'Space Mono', monospace;
     font-size: 0.85rem;
-    padding: 12px 14px 12px 42px;
+    padding: 12px 42px 12px 42px;
     outline: none;
     transition: all .25s ease;
     letter-spacing: 0.03em;
 }
+.f-toggle {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    border: none;
+    background: transparent;
+    color: rgba(255,255,255,0.85);
+    font-size: 0.95rem;
+    cursor: pointer;
+    padding: 6px;
+}
+.f-toggle:focus { outline: none; color: #00b8d4; }
 .f-input::placeholder { 
     color: rgba(255,255,255,0.35); 
     font-style: italic;
@@ -1293,6 +1318,47 @@ body {
 
 <div class="page-wrap">
 
+    <!-- ════ ERROR MESSAGE HANDLER ════ -->
+    <script>
+    (function() {
+        const params = new URLSearchParams(window.location.search);
+        const error = params.get('error');
+        const logout = params.get('logout');
+        
+        if (error === 'session_expired') {
+            Swal.fire({
+                icon: 'warning',
+                title: 'Session Expired',
+                text: 'Your prototype session has expired. Please log in again.',
+                confirmButtonText: 'OK',
+                allowOutsideClick: false
+            }).then(() => {
+                window.history.replaceState({}, document.title, window.location.pathname);
+            });
+        } else if (error === 'unauthorized') {
+            Swal.fire({
+                icon: 'error',
+                title: 'Unauthorized Access',
+                text: 'You do not have permission to access that page.',
+                confirmButtonText: 'OK',
+                allowOutsideClick: false
+            }).then(() => {
+                window.history.replaceState({}, document.title, window.location.pathname);
+            });
+        } else if (logout === '1') {
+            Swal.fire({
+                icon: 'success',
+                title: 'Logged Out',
+                text: 'You have been successfully logged out.',
+                confirmButtonText: 'OK',
+                timer: 3000
+            }).then(() => {
+                window.history.replaceState({}, document.title, window.location.pathname);
+            });
+        }
+    })();
+    </script>
+
     <!-- ════ LEFT — SYSTEM INFO ════ -->
     <div class="info-side">
 
@@ -1438,8 +1504,11 @@ Transform your traditional drying method into a smart, efficient, and modern sol
                     <label class="f-label">Model Code</label>
                     <div class="f-wrap">
                         <i class="fas fa-key f-icon"></i>
-                        <input type="text" name="code" id="givenCode" class="f-input"
-                               placeholder=" " required autocomplete="off">
+                            <input type="password" name="code" id="givenCode" class="f-input"
+                                   placeholder=" " required autocomplete="off">
+                            <button type="button" class="f-toggle" aria-label="Show code" title="Show code">
+                                <i class="fas fa-eye"></i>
+                            </button>
                     </div>
                     <div class="f-hint">enter the given code</div>
                 </div>
@@ -1593,6 +1662,28 @@ document.getElementById('loginForm').addEventListener('submit', function(e) {
             color: swalTheme.color
         }));
 });
+// Toggle visibility for the Model Code input
+(function(){
+    const toggle = document.querySelector('.f-toggle');
+    const input = document.getElementById('givenCode');
+    if (!toggle || !input) return;
+    toggle.addEventListener('click', function () {
+        const icon = this.querySelector('i');
+        if (input.type === 'password') {
+            input.type = 'text';
+            icon.classList.remove('fa-eye');
+            icon.classList.add('fa-eye-slash');
+            this.setAttribute('aria-label', 'Hide code');
+            this.title = 'Hide code';
+        } else {
+            input.type = 'password';
+            icon.classList.remove('fa-eye-slash');
+            icon.classList.add('fa-eye');
+            this.setAttribute('aria-label', 'Show code');
+            this.title = 'Show code';
+        }
+    });
+})();
 </script>
 </body>
 </html>

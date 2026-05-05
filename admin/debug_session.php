@@ -109,6 +109,6 @@ try {
 }
 
 echo "<br><br>";
-echo "<a href='users_dashboard.php' style='display:inline-flex;align-items:center;gap:8px;color:#1E88E5;text-decoration:none;font-weight:700;'><i class='fas fa-arrow-left'></i> Back to Dashboard</a>";
+echo "<a href='../prototype/users_dashboard.php' style='display:inline-flex;align-items:center;gap:8px;color:#1E88E5;text-decoration:none;font-weight:700;'><i class='fas fa-arrow-left'></i> Back to Dashboard</a>";
 echo "</div></body></html>";
 ?>

@@ -29,9 +29,18 @@ if (!isset($_SESSION['proto_id']) && isset($_SESSION['model_name'], $_SESSION['g
   } catch (Exception $e) {}
 }
 
+// ── SECURITY: Validate prototype session & prevent admin access ──
 if (!isset($_SESSION['proto_id'])) {
-    header('Location: ../index.php');
-    exit;
+  // Clear any stale admin sessions
+  $_SESSION = [];
+  header('Location: ../index.php?error=session_expired');
+  exit;
+}
+
+if (isset($_SESSION['username']) && $_SESSION['permission'] === 'admin') {
+  // Admin user trying to access prototype dashboard
+  header('Location: ../admin/admin_sessions.php');
+  exit;
 }
 $proto_id   = $_SESSION['proto_id'];
 $model_name = htmlspecialchars($_SESSION['model_name']);

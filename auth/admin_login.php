@@ -4,7 +4,7 @@ session_start();
 include('../database/dbcon.php');
 
 if (isset($_SESSION['username']) && ($_SESSION['permission'] ?? '') === 'admin') {
-    header('Location: admin_sessions.php');
+    header('Location: ../admin/admin_sessions.php');
     exit;
 }
 
@@ -43,7 +43,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'admin
         $_SESSION['username'] = $user['username'];
         $_SESSION['permission'] = 'admin';
 
-        echo json_encode(['status' => 'success', 'message' => 'Admin login successful.', 'redirect' => 'admin_sessions.php']);
+        echo json_encode(['status' => 'success', 'message' => 'Admin login successful.', 'redirect' => '../admin/admin_sessions.php']);
     } catch (Exception $e) {
         echo json_encode(['status' => 'error', 'message' => 'Login failed.']);
     }

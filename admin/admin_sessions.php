@@ -7,9 +7,21 @@ session_cache_limiter('private_no_expire');
 session_start();
 include('../database/dbcon.php');
 
+// ── SECURITY: Validate admin session & prevent prototype access ──
 if (!isset($_SESSION['username']) || $_SESSION['permission'] !== 'admin') {
-    header('Location: ../index.php'); exit;
+  // Clear any stale prototype sessions
+  $_SESSION = [];
+  header('Location: ../index.php?error=unauthorized');
+  exit;
 }
+
+if (isset($_SESSION['proto_id']) || isset($_SESSION['model_name'])) {
+  // Prototype user trying to access admin dashboard
+  header('Location: ../prototype/users_dashboard.php');
+  exit;
+  exit;
+}
+
 $admin = htmlspecialchars($_SESSION['username']);
 
 function normalizePrototypeStatus($raw) {
@@ -1678,7 +1690,7 @@ function escapeHtml(value){
 }
 function logoutAdmin(){
   Swal.fire({title:'Logout?',icon:'question',showCancelButton:true,confirmButtonColor:'#E63946',background:'#fff',color:'#0D1B2A'})
-    .then(r=>{ if(r.isConfirmed) window.location.href='logout.php'; });
+    .then(r=>{ if(r.isConfirmed) window.location.href='../auth/logout.php'; });
 }
 
 // ════════════════════════════════════════════════════════
