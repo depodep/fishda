@@ -188,6 +188,7 @@ if (isset($_GET['action'])) {
               ds.proto_id AS batch_id,
               ds.set_temp,
               ds.set_humidity,
+              ds.fish_count,
               TIMEDIFF(COALESCE(ds.end_time, NOW()), ds.start_time) AS duration,
               0 AS energy,
               COALESCE(la.temp_avg, 0) AS temp_avg,
@@ -1077,11 +1078,11 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
         <div class="section-scroll" style="padding:16px">
           <table class="data-table">
             <thead><tr>
-              <th>#</th><th>Prototype</th><th>Duration</th>
+              <th>#</th><th>Prototype</th><th>Fish Count</th><th>Duration</th>
             <th>Avg Temp</th><th>Avg Hum</th><th>Status</th><th>Timestamp</th>
             </tr></thead>
             <tbody id="recordsBody">
-              <tr><td colspan="7" style="text-align:center;padding:32px;color:var(--text-muted)"><i class="fas fa-spinner fa-spin me-2"></i>Loading sessions…</td></tr>
+              <tr><td colspan="8" style="text-align:center;padding:32px;color:var(--text-muted)"><i class="fas fa-spinner fa-spin me-2"></i>Loading sessions…</td></tr>
             </tbody>
           </table>
         </div>
@@ -1538,7 +1539,7 @@ function closeEventModal(){ document.getElementById('eventModal').style.display=
 //  RECORDS
 // ════════════════════════════════════════════════════════
 async function loadRecords(){
-  document.getElementById('recordsBody').innerHTML=`<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--text-muted)"><i class="fas fa-spinner fa-spin me-2"></i>Loading sessions…</td></tr>`;
+  document.getElementById('recordsBody').innerHTML=`<tr><td colspan="8" style="text-align:center;padding:32px;color:var(--text-muted)"><i class="fas fa-spinner fa-spin me-2"></i>Loading sessions…</td></tr>`;
   try{
     const r=await fetch('admin_sessions.php?action=fetch_all_records');
     const j=await r.json();
@@ -1548,6 +1549,7 @@ async function loadRecords(){
         <tr>
           <td class="mono" style="color:var(--teal)">#${rec.id}</td>
           <td style="font-weight:700">${(rec.prototype_model||'Fishda')} (${rec.prototype_code||'FD2026'})</td>
+          <td class="mono">${rec.fish_count||0}</td>
           <td class="mono" style="font-size:11px">${rec.duration||'—'}</td>
           <td style="font-weight:600;color:var(--amber)">${parseFloat(rec.temp_avg)>0?parseFloat(rec.temp_avg).toFixed(1)+'°C':'—'}</td>
           <td style="font-weight:600;color:var(--teal)">${parseFloat(rec.hum_avg)>0?parseFloat(rec.hum_avg).toFixed(1)+'%':'—'}</td>
@@ -1555,7 +1557,7 @@ async function loadRecords(){
           <td style="font-size:11px;color:var(--text-muted)">${rec.timestamp||'—'}</td>
         </tr>`).join('');
     } else {
-      document.getElementById('recordsBody').innerHTML=`<tr><td colspan="7" style="text-align:center;padding:48px;color:var(--text-muted)">
+      document.getElementById('recordsBody').innerHTML=`<tr><td colspan="8" style="text-align:center;padding:48px;color:var(--text-muted)">
         <div style="font-size:28px;margin-bottom:10px">📋</div>
         <div style="font-size:13px;font-weight:700;color:var(--text-primary)">No completed sessions yet</div>
         <div style="font-size:11.5px;margin-top:4px">Sessions appear here once drying cycles are completed.</div>

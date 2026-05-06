@@ -11,9 +11,10 @@
           #define DHTPIN      D4
           #define DHTTYPE     DHT11
 
-          #define FAN1_PIN    D6
-          #define FAN2_PIN    D7
-          #define FAN3_PIN    D5
+          #define FAN1_PIN    D5
+          #define FAN2_PIN    D6
+          #define HEATER1_PIN D7
+          #define HEATER2_PIN D8
 
           // STA (router) mode
           const char* sta_ssid     = "infotech-wifi";
@@ -26,7 +27,7 @@
           const String modelUnitCode  = "FD2026";
           const String deviceUniqueCode = "ESP8266-UNIT-001";
 
-          const char* serverIP = "172.20.0.212";
+          const char* serverIP = "172.20.2.36";
           const String baseURL = String("http://") + serverIP + "/fishda";
           String logReadingURL = baseURL + "/api/session_api.php";
           String sessionStatusURL = baseURL + "/api/session_api.php?action=poll_session_status";
@@ -45,7 +46,7 @@
           bool readSensorData(float &temperature, float &humidity);
           bool pollSessionStatus();
           void sendSensorData(float temperature, float humidity);
-          void controlRelays(int fan1, int fan2);
+          void controlRelays(int fan1, int fan2, int heater1, int heater2);
           void allRelaysOff();
           void connectSTA();
 
@@ -73,7 +74,8 @@
             // ACTIVE LOW relays: HIGH = OFF
             pinMode(FAN1_PIN, OUTPUT); digitalWrite(FAN1_PIN, HIGH);
             pinMode(FAN2_PIN, OUTPUT); digitalWrite(FAN2_PIN, HIGH);
-            pinMode(FAN3_PIN, OUTPUT); digitalWrite(FAN3_PIN, HIGH);
+            pinMode(HEATER1_PIN, OUTPUT); digitalWrite(HEATER1_PIN, HIGH);
+            pinMode(HEATER2_PIN, OUTPUT); digitalWrite(HEATER2_PIN, HIGH);
 
             dht.begin();
 
@@ -157,6 +159,10 @@
                 Serial.print(digitalRead(FAN1_PIN) ? 1 : 0);
                 Serial.print(" F2:");
                 Serial.print(digitalRead(FAN2_PIN) ? 1 : 0);
+                Serial.print(" H1:");
+                Serial.print(digitalRead(HEATER1_PIN) ? 1 : 0);
+                Serial.print(" H2:");
+                Serial.print(digitalRead(HEATER2_PIN) ? 1 : 0);
                 Serial.println();
                 
                 return true;
@@ -245,25 +251,32 @@
 
                 int fan1 = data["fan1"] | 0;
                 int fan2 = data["fan2"] | 0;
+                int heater1 = data["heater1"] | 0;
+                int heater2 = data["heater2"] | 0;
 
                 String command = data["command"] | "RUN";
                 if (command == "COOLDOWN") {
                   fan1 = 0;
                   fan2 = 0;
+                  heater1 = 0;
+                  heater2 = 0;
                 }
 
-                controlRelays(fan1, fan2);
+                controlRelays(fan1, fan2, heater1, heater2);
 
                 Serial.print("Relays -> F1:");
                 Serial.print(fan1);
                 Serial.print(" F2:");
                 Serial.print(fan2);
+                Serial.print(" H1:");
+                Serial.print(heater1);
+                Serial.print(" H2:");
+                Serial.print(heater2);
                 Serial.print(" | phase: ");
                 Serial.print(data["phase"] | "Unknown");
                 Serial.print(" | cmd: ");
                 Serial.println(command);
               } else {
-                // Idle / invalid response fallback
                 allRelaysOff();
               }
             } else {
@@ -276,11 +289,12 @@
           }
 
 
-          void controlRelays(int fan1, int fan2) {
+          void controlRelays(int fan1, int fan2, int heater1, int heater2) {
             // ACTIVE LOW relay: 1=ON (LOW), 0=OFF (HIGH)
             digitalWrite(FAN1_PIN, fan1 ? LOW : HIGH);
             digitalWrite(FAN2_PIN, fan2 ? LOW : HIGH);
-            digitalWrite(FAN3_PIN, fan1 ? LOW : HIGH);  
+            digitalWrite(HEATER1_PIN, heater1 ? LOW : HIGH);
+            digitalWrite(HEATER2_PIN, heater2 ? LOW : HIGH);
           }
 
 
@@ -288,7 +302,8 @@
             // ACTIVE LOW relay: HIGH = OFF
             digitalWrite(FAN1_PIN, HIGH);
             digitalWrite(FAN2_PIN, HIGH);
-            digitalWrite(FAN3_PIN, HIGH);
+            digitalWrite(HEATER1_PIN, HIGH);
+            digitalWrite(HEATER2_PIN, HIGH);
           }
 
 

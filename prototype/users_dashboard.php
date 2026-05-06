@@ -205,17 +205,19 @@ if (!isset($_SESSION['session_logged'])) {
   .stat-accent{position:absolute;bottom:-18px;right:-18px;width:64px;height:64px;border-radius:50%;filter:blur(24px);opacity:.13;}
 
   /* ── CONTROL PANEL ─────────────────────────── */
-  .control-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:24px;box-shadow:var(--shadow-sm);}
-  .control-section-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.14em;color:var(--text-muted);margin-bottom:16px;display:flex;align-items:center;gap:6px;}
-  .range-group{margin-bottom:20px;}
-  .range-label{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;}
+  .control-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px;box-shadow:var(--shadow-sm);}
+  .control-section-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.14em;color:var(--text-muted);margin-bottom:12px;display:flex;align-items:center;gap:6px;}
+  .range-columns{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;}
+  .range-group{margin-bottom:12px;}
+  .range-group:last-child{margin-bottom:0;}
+  .range-label{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;}
   .range-name{font-size:12.5px;font-weight:600;color:var(--text-secondary);}
   .range-val{font-family:'Playfair Display',serif;font-size:22px;font-weight:700;color:var(--teal);}
   .range-val.hum{color:var(--seafoam);}
   input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:5px;background:var(--surface-2);border-radius:99px;outline:none;border:1px solid var(--border);}
   input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:19px;height:19px;border-radius:50%;background:var(--teal);box-shadow:0 2px 8px rgba(42,157,143,.38);cursor:pointer;border:2px solid #fff;}
   input[type=range].hum-range::-webkit-slider-thumb{background:var(--seafoam);box-shadow:0 2px 8px rgba(82,182,154,.38);}
-  .btn-start{background:linear-gradient(135deg,var(--teal),var(--teal-light));border:none;border-radius:11px;padding:13px 24px;font-size:13px;font-weight:700;color:#fff;cursor:pointer;width:100%;transition:.22s;box-shadow:0 4px 20px rgba(42,157,143,.30);font-family:'Mulish',sans-serif;letter-spacing:.03em;text-transform:uppercase;}
+  .btn-start{background:linear-gradient(135deg,var(--teal),var(--teal-light));border:none;border-radius:11px;padding:11px 20px;font-size:13px;font-weight:700;color:#fff;cursor:pointer;width:100%;transition:.22s;box-shadow:0 4px 20px rgba(42,157,143,.30);font-family:'Mulish',sans-serif;letter-spacing:.03em;text-transform:uppercase;}
   .btn-start:hover{transform:translateY(-2px);box-shadow:0 8px 28px rgba(42,157,143,.45);}
   .btn-stop{background:linear-gradient(135deg,var(--terracotta),#9C3510);border:none;border-radius:11px;padding:13px 24px;font-size:13px;font-weight:700;color:#fff;cursor:pointer;width:100%;transition:.22s;box-shadow:0 4px 20px rgba(193,68,14,.28);font-family:'Mulish',sans-serif;letter-spacing:.03em;text-transform:uppercase;}
   .btn-stop:hover{transform:translateY(-2px);box-shadow:0 8px 28px rgba(193,68,14,.42);}
@@ -515,26 +517,37 @@ if (!isset($_SESSION['session_logged'])) {
         <div class="col-lg-4">
           <div class="control-card">
             <div class="control-section-title"><i class="fas fa-sliders" style="color:var(--teal)"></i>Set Parameters</div>
-            <div class="range-group">
-              <div class="range-label">
-                <span class="range-name"><i class="fas fa-temperature-high me-2" style="color:var(--teal)"></i>Target Temperature</span>
-                <span class="range-val" id="tempVal">50°C</span>
+            <div class="range-columns">
+              <div class="range-group">
+                <div class="range-label">
+                  <span class="range-name"><i class="fas fa-temperature-high me-2" style="color:var(--teal)"></i>Target Temp</span>
+                  <span class="range-val" id="tempVal">50°C</span>
+                </div>
+                <input type="range" id="tempRange" min="30" max="80" value="50" oninput="document.getElementById('tempVal').textContent=this.value+'°C'">
               </div>
-              <input type="range" id="tempRange" min="30" max="80" value="50" oninput="document.getElementById('tempVal').textContent=this.value+'°C'">
+              <div class="range-group">
+                <div class="range-label">
+                  <span class="range-name"><i class="fas fa-droplet me-2" style="color:var(--seafoam)"></i>Target Humidity</span>
+                  <span class="range-val hum" id="humVal">30%</span>
+                </div>
+                <input type="range" id="humRange" min="10" max="80" value="30" class="hum-range" oninput="document.getElementById('humVal').textContent=this.value+'%'">
+              </div>
             </div>
-            <div class="range-group">
-              <div class="range-label">
-                <span class="range-name"><i class="fas fa-droplet me-2" style="color:var(--seafoam)"></i>Target Humidity</span>
-                <span class="range-val hum" id="humVal">30%</span>
+            <div class="range-columns">
+              <div class="range-group">
+                <div class="range-label">
+                  <span class="range-name"><i class="fas fa-hourglass-half me-2" style="color:var(--golden)"></i>Run Duration</span>
+                  <span class="range-val" id="durationVal" style="color:var(--golden);font-size:20px;">2.0h</span>
+                </div>
+                <input type="text" id="durationHours" value="2" class="form-input" style="font-size:12px;" placeholder="2 or 01:30" oninput="updateDurationPreview()">
               </div>
-              <input type="range" id="humRange" min="10" max="80" value="30" class="hum-range" oninput="document.getElementById('humVal').textContent=this.value+'%'">
-            </div>
-            <div class="range-group">
-              <div class="range-label">
-                <span class="range-name"><i class="fas fa-hourglass-half me-2" style="color:var(--golden)"></i>Run Duration</span>
-                <span class="range-val" id="durationVal" style="color:var(--golden);font-size:20px;">2.0h</span>
+              <div class="range-group">
+                <div class="range-label">
+                  <span class="range-name"><i class="fas fa-fish me-2" style="color:var(--amber)"></i>Fish Count</span>
+                  <span class="range-val" id="fishCountVal" style="color:var(--amber);">0</span>
+                </div>
+                <input type="number" id="fishCount" value="" min="1" class="form-input" style="font-size:12px;" placeholder="Enter count" required oninput="document.getElementById('fishCountVal').textContent=this.value||'0'">
               </div>
-              <input type="text" id="durationHours" value="2" class="form-input" style="font-size:12px;" placeholder="2 or 01:30" oninput="updateDurationPreview()">
             </div>
             <div id="controlSection">
               <button class="btn-start" id="startBtn" onclick="startSession()"><i class="fas fa-robot me-2"></i>Start Auto Session</button>
@@ -603,22 +616,28 @@ if (!isset($_SESSION['session_logged'])) {
               <div style="background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.2);border-radius:8px;padding:10px;margin-top:12px;display:none;" id="hwStatusCard">
                 <div style="font-size:10px;color:var(--text-muted);margin-bottom:8px;font-weight:600;text-transform:uppercase;"><i class="fas fa-bolt me-1"></i>Hardware Status</div>
                 <div class="row g-2" style="font-size:11px;">
-                  <div class="col-4">
-                    <div style="display:flex;align-items:center;gap:4px;padding:6px;background:rgba(0,0,0,.05);border-radius:4px;">
-                      <span style="width:8px;height:8px;border-radius:50%;background:#ccc;display:inline-block;" id="hwHeater"></span>
-                      <span id="hwHeaterLabel">Heater</span>
+                  <div class="col-6 col-md-3">
+                    <div style="display:flex;align-items:center;gap:8px;padding:6px;background:rgba(0,0,0,.05);border-radius:6px;">
+                      <span style="width:10px;height:10px;border-radius:50%;background:#ccc;display:inline-block;" id="hwFan1"></span>
+                      <span id="hwFan1Label">Fan 1</span>
                     </div>
                   </div>
-                  <div class="col-4">
-                    <div style="display:flex;align-items:center;gap:4px;padding:6px;background:rgba(0,0,0,.05);border-radius:4px;">
-                      <span style="width:8px;height:8px;border-radius:50%;background:#ccc;display:inline-block;" id="hwFan"></span>
-                      <span id="hwFanLabel">Fan</span>
+                  <div class="col-6 col-md-3">
+                    <div style="display:flex;align-items:center;gap:8px;padding:6px;background:rgba(0,0,0,.05);border-radius:6px;">
+                      <span style="width:10px;height:10px;border-radius:50%;background:#ccc;display:inline-block;" id="hwFan2"></span>
+                      <span id="hwFan2Label">Fan 2</span>
                     </div>
                   </div>
-                  <div class="col-4">
-                    <div style="display:flex;align-items:center;gap:4px;padding:6px;background:rgba(0,0,0,.05);border-radius:4px;">
-                      <span style="width:8px;height:8px;border-radius:50%;background:#ccc;display:inline-block;" id="hwExhaust"></span>
-                      <span id="hwExhaustLabel">Exhaust</span>
+                  <div class="col-6 col-md-3">
+                    <div style="display:flex;align-items:center;gap:8px;padding:6px;background:rgba(0,0,0,.05);border-radius:6px;">
+                      <span style="width:10px;height:10px;border-radius:50%;background:#ccc;display:inline-block;" id="hwHeater1"></span>
+                      <span id="hwHeater1Label">Heater 1</span>
+                    </div>
+                  </div>
+                  <div class="col-6 col-md-3">
+                    <div style="display:flex;align-items:center;gap:8px;padding:6px;background:rgba(0,0,0,.05);border-radius:6px;">
+                      <span style="width:10px;height:10px;border-radius:50%;background:#ccc;display:inline-block;" id="hwHeater2"></span>
+                      <span id="hwHeater2Label">Heater 2</span>
                     </div>
                   </div>
                 </div>
@@ -692,11 +711,11 @@ if (!isset($_SESSION['session_logged'])) {
         <div class="section-scroll">
           <table class="data-table">
             <thead><tr>
-              <th>#</th><th>Date &amp; Time</th><th>Operator</th><th>Duration</th>
+              <th>#</th><th>Date &amp; Time</th><th>Operator</th><th>Fish Count</th><th>Duration</th>
               <th>Avg Temp</th><th>Avg Humidity</th><th>Status</th><th>Action</th>
             </tr></thead>
             <tbody id="myRecordsBody">
-              <tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted)"><i class="fas fa-spinner fa-spin me-2"></i>Loading…</td></tr>
+              <tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text-muted)"><i class="fas fa-spinner fa-spin me-2"></i>Loading…</td></tr>
             </tbody>
           </table>
         </div>
@@ -776,6 +795,12 @@ if (!isset($_SESSION['session_logged'])) {
           <input type="number" id="sched_hum" class="form-input" value="30" min="10" max="80">
         </div>
       </div>
+      <div class="col-6">
+        <div class="form-row">
+          <label class="form-label">Fish Count</label>
+          <input type="number" id="sched_fish_count" class="form-input" value="0" min="0" placeholder="Number of fish">
+        </div>
+      </div>
     </div>
     <div class="row g-3 mt-2">
       <div class="col-6">
@@ -838,10 +863,78 @@ setInterval(()=>{
   document.getElementById('navClock').textContent=new Date().toLocaleTimeString('en-PH',{hour12:false});
 },1000);
 
+// ── Session validity check on page load ──
+window.addEventListener('load', () => {
+  // Check if user is still logged in periodically
+  // Add a small delay before first check to allow session to fully establish
+  setTimeout(() => {
+    const sessionCheckInterval = setInterval(async () => {
+      try {
+        const response = await fetch('../api/session_api.php?action=poll_session_status');
+        
+        if (!response.ok) {
+          console.warn('Session validation HTTP error:', response.status);
+          return; // Don't log out on HTTP errors, just skip this check
+        }
+        
+        const j = await response.json();
+        
+        // Only treat explicit 'error' status with session-related message as expiry
+        if (j && j.status === 'error') {
+          if (j.message && j.message.toLowerCase().includes('login')) {
+            console.warn('Session validation error:', j.message);
+            handleSessionExpired();
+          }
+        }
+      } catch (e) {
+        // Network or parse errors - don't immediately assume logout
+        // This could be a temporary network glitch
+        console.warn('Session check network error (will retry):', e.message);
+      }
+    }, 30000); // Check every 30 seconds
+    
+    // Store interval ID so it can be cleared if needed
+    window.sessionCheckInterval = sessionCheckInterval;
+  }, 5000); // Wait 5 seconds after page load before first check
+});
+
+// Handle expired session
+function handleSessionExpired(){
+  // Disable all tabs and buttons
+  disableAllTabsAndButtons();
+  
+  // Show message
+  Swal.fire({
+    title:'⚠️ Session Expired',
+    html:`<div style="text-align:center;padding:12px 0;">
+      <div style="font-size:13px;color:var(--text-primary);margin-bottom:10px;">Your session has expired or you have been logged out.</div>
+      <div style="background:rgba(193,68,14,.08);border:1px solid rgba(193,68,14,.2);border-radius:8px;padding:10px;font-size:11px;color:var(--text-secondary);">
+        Please log in again to continue.
+      </div>
+    </div>`,
+    icon:'warning',
+    confirmButtonText:'Back to Login',
+    confirmButtonColor:'#E63946',
+    background:'#fff',
+    color:'#0D1B2A',
+    allowOutsideClick:false,
+    didOpen: () => {
+      document.querySelector('.swal2-confirm').focus();
+    }
+  }).then(() => {
+    window.location.href='../index.php?error=session_expired';
+  });
+}
+
 // ════════════════════════════════════════════════════════
 //  TAB NAVIGATION
 // ════════════════════════════════════════════════════════
 function showTab(tab){
+  // Prevent tab switching if logout is in progress
+  if(document.getElementById('logoutOverlay')){
+    return false;
+  }
+  
   document.querySelectorAll('.tab-section').forEach(s=>s.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   document.getElementById('tab-'+tab).classList.add('active');
@@ -871,6 +964,12 @@ async function startSession(isAutoStart=false){
 
   const temp=document.getElementById('tempRange').value;
   const hum=document.getElementById('humRange').value;
+  const fishCountInput=(document.getElementById('fishCount').value || '').trim();
+  const fishCount=parseInt(fishCountInput, 10);
+  if(!fishCountInput || !Number.isInteger(fishCount) || fishCount < 1){
+    showToast('warning','Invalid Fish Count','Fish count must be at least 1.',3500);
+    return;
+  }
   const durationInput=(document.getElementById('durationHours')?.value || '2').trim();
   let durationHours=parseDurationHoursInput(durationInput);
   if(durationHours===null){
@@ -884,7 +983,8 @@ async function startSession(isAutoStart=false){
       title:'Start Auto Session?',
       html:`<div style="text-align:center;padding:8px 0;">
         <div style="font-size:14px;color:#4A6FA5;margin-bottom:6px;">Target: <b>${temp}°C</b> / <b>${hum}%</b> Humidity</div>
-        <div style="font-size:12px;color:#8BA7C4;">Duration: <b>${formatDurationDisplay(durationHours)}</b></div>
+        <div style="font-size:12px;color:#8BA7C4;margin-bottom:4px;">Duration: <b>${formatDurationDisplay(durationHours)}</b></div>
+        <div style="font-size:12px;color:#8BA7C4;">🐟 Fish: <b>${fishCount}</b></div>
       </div>`,
       icon:'question',showCancelButton:true,confirmButtonColor:'#2A9D8F',
       confirmButtonText:'Start',background:'#fff',color:'#0D1B2A'
@@ -897,6 +997,7 @@ async function startSession(isAutoStart=false){
     fd.append('action','start_session');
     fd.append('set_temp',temp);
     fd.append('set_humidity',hum);
+    fd.append('fish_count',fishCount);
     fd.append('duration_hours', durationHours.toString());
     const j=await(await fetch('../api/session_api.php',{method:'POST',body:fd})).json();
     if(j.status==='success'){
@@ -910,7 +1011,29 @@ async function startSession(isAutoStart=false){
       updateControlUI(true,temp,hum);
       updateSessionBadge(true);
       startTimer();
-      showToast('success','Session Started!',`Auto run for ${formatDurationDisplay(durationHours)} at ${temp}°C / ${hum}%`,4000);
+      // ── Session Started Notification Modal ──
+      Swal.fire({
+        title:'✅ Session Started!',
+        html:`<div style="text-align:center;padding:12px 0;">
+          <div style="font-size:14px;color:#2A9D8F;margin-bottom:12px;">Drying session is now running</div>
+          <div style="font-size:11.5px;color:var(--text-muted);background:rgba(42,157,143,.08);border-radius:8px;padding:10px;margin-bottom:10px;">
+            <div>🌡️ Temperature: <b>${temp}°C</b></div>
+            <div>💧 Humidity: <b>${hum}%</b></div>
+            <div>⏱️ Duration: <b>${formatDurationDisplay(durationHours)}</b></div>
+            <div>🐟 Fish Count: <b>${fishCount}</b></div>
+          </div>
+        </div>`,
+        icon:'success',
+        confirmButtonText:'Okay',
+        confirmButtonColor:'#2A9D8F',
+        background:'#fff',
+        color:'#0D1B2A',
+        allowOutsideClick:false,
+        didOpen: () => {
+          document.querySelector('.swal2-confirm').focus();
+        }
+      });
+      showToast('success','Session Started!',`${fishCount} fish • ${formatDurationDisplay(durationHours)} • ${temp}°C / ${hum}%`,4000);
       pollLiveData();
     } else { showToast('warning','Error',j.message||'Could not start.',4000); }
   }catch(e){ showToast('warning','Network Error','Could not reach server.',3000); }
@@ -937,6 +1060,29 @@ async function autoStopByDuration(){
       updateControlUI(false);
       updateSessionBadge(false);
       hideBanners();
+      
+      // ── Session Ended by Duration - Notification Modal ──
+      Swal.fire({
+        title:'✅ Session Completed',
+        html:`<div style="text-align:center;padding:12px 0;">
+          <div style="font-size:14px;color:#2A9D8F;margin-bottom:12px;">Scheduled duration reached</div>
+          <div style="font-size:11.5px;color:var(--text-muted);background:rgba(42,157,143,.08);border-radius:8px;padding:10px;margin-bottom:10px;">
+            <div>✅ Session stopped automatically</div>
+            <div>All devices turned off</div>
+            <div>Session saved successfully</div>
+          </div>
+        </div>`,
+        icon:'success',
+        confirmButtonText:'Okay',
+        confirmButtonColor:'#2A9D8F',
+        background:'#fff',
+        color:'#0D1B2A',
+        allowOutsideClick:false,
+        didOpen: () => {
+          document.querySelector('.swal2-confirm').focus();
+        }
+      });
+      
       showToast('success', 'Session Completed', 'Duration reached. Session stopped automatically.', 4500);
     } else {
       // Fallback hard stop if graceful stop fails
@@ -1036,6 +1182,28 @@ async function stopSession(){
       updateControlUI(false);
       updateSessionBadge(false);
       hideBanners();
+      
+      // ── Session Ended Notification Modal ──
+      Swal.fire({
+        title:'✅ Session Ended',
+        html:`<div style="text-align:center;padding:12px 0;">
+          <div style="font-size:14px;color:#2A9D8F;margin-bottom:12px;">Drying session completed successfully</div>
+          <div style="font-size:11.5px;color:var(--text-muted);background:rgba(42,157,143,.08);border-radius:8px;padding:10px;margin-bottom:10px;">
+            <div>🐟 Session terminated</div>
+            <div>All heating devices turned off</div>
+            <div>Session progress saved to records</div>
+          </div>
+        </div>`,
+        icon:'success',
+        confirmButtonText:'Okay',
+        confirmButtonColor:'#2A9D8F',
+        background:'#fff',
+        color:'#0D1B2A',
+        allowOutsideClick:false,
+        didOpen: () => {
+          document.querySelector('.swal2-confirm').focus();
+        }
+      });
       
       // Clear hardware states and sensor labels
       updateHWChips({
@@ -1589,22 +1757,24 @@ function updateGaugeArc(id,val,max){
   el.style.strokeDashoffset=Math.max(0,offset);
 }
 
-// ── ENHANCED: Hardware status with phase-aware descriptions ──
-function updateHWChips(d){
+ function updateHWChips(d){
   const phase = d.phase || 'Idle';
   const isSession = sessionRunning;
   const temp = parseFloat(d.recorded_temp) || 0;
   const targetTemp = parseFloat(d.set_temp) || currentSetTemp;
 
-  // Determine status context for better descriptions
-  const statusText = getHardwareStatusText(phase, isSession);
+   const statusText = getHardwareStatusText(phase, isSession);
 
-  // Update sensor labels with phase information
-  updateSensorLabels(phase, isSession, temp, targetTemp);
+   updateSensorLabels(phase, isSession, temp, targetTemp);
+
+   const fan1Val = parseInt(d.fan1 ?? d.fan1_state ?? d.fan_state ?? 0);
+  const fan2Val = parseInt(d.fan2 ?? d.fan2_state ?? 0);
+  const heater1Val = parseInt(d.heater1 ?? d.heater1_state ?? d.heater_state ?? 0);
+  const heater2Val = parseInt(d.heater2 ?? d.heater2_state ?? 0);
 
   const chips=[
-    {label:'Fan 1',    on: parseInt(d.fan1||0)===1, desc: phase === 'Heating' ? '(Heat)' : phase === 'Drying' ? '(Circ)' : ''},
-    {label:'Fan 2',    on: parseInt(d.fan2||0)===1, desc: phase === 'Heating' ? '(Heat)' : phase === 'Drying' ? '(Circ)' : ''},
+    {label:'Fan 1', on: fan1Val===1, desc: phase === 'Heating' ? '(Heat)' : phase === 'Drying' ? '(Circ)' : ''},
+    {label:'Fan 2', on: fan2Val===1, desc: phase === 'Heating' ? '(Heat)' : phase === 'Drying' ? '(Circ)' : ''},
   ];
 
   const hwChipsHtml = chips.map(c=>
@@ -1615,54 +1785,58 @@ function updateHWChips(d){
   ).join('');
 
   // Update hardware status card in drying progress
-  updateHardwareStatusCard(d);
+  updateHardwareStatusCard({fan1:fan1Val,fan2:fan2Val,heater1:heater1Val,heater2:heater2Val});
   
   // Update fan indicators in live reading card
-  updateFanIndicators(d);
+  updateFanIndicators({fan1:fan1Val,fan2:fan2Val});
 }
 
 // ── Update fan indicators in LIVE READING card ──
 function updateFanIndicators(d) {
-  const fan1On = parseInt(d.fan1 || 0) === 1;
-  const fan2On = parseInt(d.fan2 || 0) === 1;
-  
+  const fan1On = parseInt(d.fan1 ?? d.fan1_state ?? d.fan_state ?? 0) === 1;
+  const fan2On = parseInt(d.fan2 ?? d.fan2_state ?? 0) === 1;
+
   const fan1Dot = document.getElementById('fan1Dot');
   const fan2Dot = document.getElementById('fan2Dot');
   const fan1Indicator = document.getElementById('fan1Indicator');
   const fan2Indicator = document.getElementById('fan2Indicator');
-  
-  if(fan1Dot && fan2Dot){
-    fan1Dot.style.background = fan1On ? '#10b981' : '#ccc';
-    fan2Dot.style.background = fan2On ? '#10b981' : '#ccc';
-    
-    fan1Indicator.style.background = fan1On ? 'rgba(16,185,129,.15)' : 'rgba(0,0,0,.08)';
-    fan2Indicator.style.background = fan2On ? 'rgba(16,185,129,.15)' : 'rgba(0,0,0,.08)';
-    
-    document.getElementById('fan1Label').textContent = fan1On ? 'Fan 1 • ON' : 'Fan 1';
-    document.getElementById('fan2Label').textContent = fan2On ? 'Fan 2 • ON' : 'Fan 2';
-  }
+
+  if (fan1Dot) fan1Dot.style.background = fan1On ? '#10b981' : '#ccc';
+  if (fan2Dot) fan2Dot.style.background = fan2On ? '#10b981' : '#ccc';
+
+  if (fan1Indicator) fan1Indicator.style.background = fan1On ? 'rgba(16,185,129,.15)' : 'rgba(0,0,0,.08)';
+  if (fan2Indicator) fan2Indicator.style.background = fan2On ? 'rgba(16,185,129,.15)' : 'rgba(0,0,0,.08)';
+
+  const f1Label = document.getElementById('fan1Label');
+  const f2Label = document.getElementById('fan2Label');
+  if (f1Label) f1Label.textContent = fan1On ? 'Fan 1 • ON' : 'Fan 1';
+  if (f2Label) f2Label.textContent = fan2On ? 'Fan 2 • ON' : 'Fan 2';
 }
 
 // ── Update hardware status indicators in DRYING PROGRESS card ──
 function updateHardwareStatusCard(d) {
   const hwCard = document.getElementById('hwStatusCard');
   if (!hwCard) return;
-
-  const fan1On = parseInt(d.fan1 || 0) === 1;
-  const fan2On = parseInt(d.fan2 || 0) === 1;
+  const fan1On = parseInt(d.fan1 ?? d.fan1_state ?? d.fan_state ?? 0) === 1;
+  const fan2On = parseInt(d.fan2 ?? d.fan2_state ?? 0) === 1;
+  const heater1On = parseInt(d.heater1 ?? d.heater1_state ?? d.heater_state ?? 0) === 1;
+  const heater2On = parseInt(d.heater2 ?? d.heater2_state ?? 0) === 1;
 
   // Update dot colors and labels
-  const fan1Dot = document.getElementById('hwHeater');
-  const fan2Dot = document.getElementById('hwFan');
-  const exhaustDot = document.getElementById('hwExhaust');
+  const fan1Dot = document.getElementById('hwFan1');
+  const fan2Dot = document.getElementById('hwFan2');
+  const heater1Dot = document.getElementById('hwHeater1');
+  const heater2Dot = document.getElementById('hwHeater2');
 
-  fan1Dot.style.background = fan1On ? '#3b82f6' : '#d1d5db';
-  fan2Dot.style.background = fan2On ? '#3b82f6' : '#d1d5db';
-  exhaustDot.style.background = '#d1d5db';  // Not used, hide
-  exhaustDot.parentElement.style.display = 'none';
+  if (fan1Dot) fan1Dot.style.background = fan1On ? '#3b82f6' : '#d1d5db';
+  if (fan2Dot) fan2Dot.style.background = fan2On ? '#3b82f6' : '#d1d5db';
+  if (heater1Dot) heater1Dot.style.background = heater1On ? '#f97316' : '#d1d5db';
+  if (heater2Dot) heater2Dot.style.background = heater2On ? '#f97316' : '#d1d5db';
 
-  document.getElementById('hwHeaterLabel').textContent = fan1On ? '💨 Fan 1' : 'Fan 1';
-  document.getElementById('hwFanLabel').textContent = fan2On ? '💨 Fan 2' : 'Fan 2';
+  if (document.getElementById('hwFan1Label')) document.getElementById('hwFan1Label').textContent = fan1On ? 'Fan 1 • ON' : 'Fan 1';
+  if (document.getElementById('hwFan2Label')) document.getElementById('hwFan2Label').textContent = fan2On ? 'Fan 2 • ON' : 'Fan 2';
+  if (document.getElementById('hwHeater1Label')) document.getElementById('hwHeater1Label').textContent = heater1On ? 'Heater 1 • ON' : 'Heater 1';
+  if (document.getElementById('hwHeater2Label')) document.getElementById('hwHeater2Label').textContent = heater2On ? 'Heater 2 • ON' : 'Heater 2';
 
   // Show card only during active session
   hwCard.style.display = sessionRunning ? '' : 'none';
@@ -1832,7 +2006,7 @@ function refreshLiveChartsFromLogs(logs){
 //  MY RECORDS
 // ════════════════════════════════════════════════════════
 async function fetchMyRecords(){
-  document.getElementById('myRecordsBody').innerHTML=`<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-muted)"><i class="fas fa-spinner fa-spin me-2"></i>Loading…</td></tr>`;
+  document.getElementById('myRecordsBody').innerHTML=`<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text-muted)"><i class="fas fa-spinner fa-spin me-2"></i>Loading…</td></tr>`;
   try{
     const j=await(await fetch('../api/session_api.php?action=get_my_sessions')).json();
     if(j.status==='success'&&j.data?.length){
@@ -1849,6 +2023,7 @@ async function fetchMyRecords(){
           <td class="mono" style="color:var(--teal)">${i+1}</td>
           <td style="font-size:11.5px;color:var(--text-muted)">${s.start_time?.slice(0,16)||'—'}</td>
           <td style="font-size:10px;color:var(--text-primary);font-weight:600;">${s.display_name || s.device_info || 'FISDA - Unknown Device'}</td>
+          <td class="mono">${s.fish_count||0}</td>
           <td class="mono">${s.duration?.slice(0,8)||'—'}</td>
           <td style="font-weight:600;color:var(--golden)">${s.avg_temp?parseFloat(s.avg_temp).toFixed(1)+'°C':'—'}</td>
           <td style="font-weight:600;color:var(--seafoam)">${s.avg_hum?parseFloat(s.avg_hum).toFixed(1)+'%':'—'}</td>
@@ -1857,14 +2032,14 @@ async function fetchMyRecords(){
         </tr>`).join('');
     } else {
       document.getElementById('myTotalSessionsCtrl').textContent='0';
-      document.getElementById('myRecordsBody').innerHTML=`<tr><td colspan="8" style="text-align:center;padding:48px;color:var(--text-muted)">
+      document.getElementById('myRecordsBody').innerHTML=`<tr><td colspan="9" style="text-align:center;padding:48px;color:var(--text-muted)">
         <div style="font-size:28px;margin-bottom:8px">🐟</div>
         <div style="font-size:13px;font-weight:700;color:var(--text-primary)">No sessions yet</div>
         <div style="font-size:11.5px;margin-top:3px">Start a prototype drying session to see your sessions here.</div>
       </td></tr>`;
     }
   }catch(e){
-    document.getElementById('myRecordsBody').innerHTML=`<tr><td colspan="8" style="text-align:center;padding:28px;color:var(--text-muted)">No data found.</td></tr>`;
+    document.getElementById('myRecordsBody').innerHTML=`<tr><td colspan="9" style="text-align:center;padding:28px;color:var(--text-muted)">No data found.</td></tr>`;
   }
 }
 
@@ -1915,6 +2090,15 @@ function openScheduleModal(){
   document.getElementById('sched_date').value=today;
   document.getElementById('sched_date').min=today;
   document.getElementById('sched_time').value=`${nextHour}:00`;
+  document.getElementById('sched_title').value='Tilapia Batch';
+  document.getElementById('sched_temp').value='50';
+  document.getElementById('sched_hum').value='30';
+  document.getElementById('sched_fish_count').value='0';
+  document.getElementById('sched_duration').value='02:00';
+  document.getElementById('sched_notes').value='';
+  editingScheduleId=null;
+  document.querySelector('#scheduleModal .modal-title').innerHTML='<i class="fas fa-calendar-plus me-2"></i>Add New Batch';
+  document.querySelector('#scheduleModal button.btn-primary').textContent='Add Batch';
   document.getElementById('scheduleModal').style.display='flex';
 }
 function closeScheduleModal(){
@@ -1995,6 +2179,7 @@ function openEditSchedule(encoded){
   document.getElementById('sched_time').value=(schedule.sched_time||'08:00').slice(0,5);
   document.getElementById('sched_temp').value=schedule.set_temp??50;
   document.getElementById('sched_hum').value=schedule.set_humidity??30;
+  document.getElementById('sched_fish_count').value=schedule.fish_count??0;
   document.getElementById('sched_duration').value=formatDurationDisplay(parseFloat(schedule.duration_hours??2.0));
   document.getElementById('sched_notes').value=schedule.notes||'';
   document.getElementById('scheduleModal').style.display='flex';
@@ -2006,6 +2191,12 @@ async function submitSchedule(){
   const time=document.getElementById('sched_time').value;
   const temp=document.getElementById('sched_temp').value;
   const hum=document.getElementById('sched_hum').value;
+  const fishCountInput=(document.getElementById('sched_fish_count').value || '').trim();
+  const fishCount=parseInt(fishCountInput, 10);
+  if(!fishCountInput || !Number.isInteger(fishCount) || fishCount < 1){
+    showToast('warning','Invalid Fish Count','Fish count must be at least 1.',3500);
+    return;
+  }
   const durationRaw=(document.getElementById('sched_duration').value || '').trim();
   const notes=document.getElementById('sched_notes').value;
 
@@ -2021,7 +2212,7 @@ async function submitSchedule(){
     return;
   }
 
-  console.log('📅 Submitting schedule:', { title, date, time, temp, hum, durationHours, notes });
+  console.log('📅 Submitting schedule:', { title, date, time, temp, hum, fishCount, durationHours, notes });
   
   if(!date){ showToast('warning','Date Required','Please choose a schedule date.',3000); return; }
   const fd=new FormData();
@@ -2033,6 +2224,7 @@ async function submitSchedule(){
   fd.append('sched_time',time);
   fd.append('set_temp',temp);
   fd.append('set_hum',hum);
+  fd.append('fish_count',fishCount.toString());
   fd.append('duration_hours',durationHours.toString());
   fd.append('notes',notes);
   try{
@@ -2135,6 +2327,7 @@ async function loadUserSchedules(){
             sched_time: s.sched_time,
             set_temp: s.set_temp,
             set_humidity: s.set_humidity,
+            fish_count: s.fish_count||0,
             notes: s.notes,
             duration_hours: s.duration_hours
           }))}')">Edit</button>
@@ -2154,7 +2347,7 @@ function showEventModal(event){
     const statusLabel=normalizeScheduleStatus(p.status);
     html=evRow('Date/Time',formatScheduleDateTime(event.startStr?.slice(0,10), event.startStr?.slice(11,16)))+evRow('Targets',`${p.set_temp}°C / ${p.set_humidity}%`)+`<div style="display:flex;justify-content:space-between;padding:9px 0;font-size:12.5px;"><span style="color:var(--text-muted)">Status</span><span class="pill pill-${scheduleStatusClass(p.status)}">${statusLabel}</span></div>`+
     (p.notes?`<div style="background:var(--surface-2);border-radius:8px;padding:10px;font-size:11.5px;color:var(--text-muted);margin-top:8px">${p.notes}</div>`:'');
-    document.getElementById('evtActions').innerHTML=`<div class="d-flex gap-2"><button onclick="openEditSchedule('${encodeURIComponent(JSON.stringify({id:p.schedule_id,title:event.title.replace(/^. /,''),sched_date:event.startStr?.slice(0,10),sched_time:event.startStr?.slice(11,16),set_temp:p.set_temp,set_humidity:p.set_humidity,notes:p.notes,duration_hours:p.duration_hours||2.0}))}');closeEventModal()" class="act-btn act-edit" style="flex:1;padding:8px;"><i class="fas fa-pen me-1"></i>Edit</button><button onclick="deleteSchedule(${p.schedule_id});closeEventModal()" class="act-btn act-del" style="flex:1;padding:8px;"><i class="fas fa-trash me-1"></i>Remove</button></div>`;
+    document.getElementById('evtActions').innerHTML=`<div class="d-flex gap-2"><button onclick="openEditSchedule('${encodeURIComponent(JSON.stringify({id:p.schedule_id,title:event.title.replace(/^. /,''),sched_date:event.startStr?.slice(0,10),sched_time:event.startStr?.slice(11,16),set_temp:p.set_temp,set_humidity:p.set_humidity,fish_count:p.fish_count||0,notes:p.notes,duration_hours:p.duration_hours||2.0}))}');closeEventModal()" class="act-btn act-edit" style="flex:1;padding:8px;"><i class="fas fa-pen me-1"></i>Edit</button><button onclick="deleteSchedule(${p.schedule_id});closeEventModal()" class="act-btn act-del" style="flex:1;padding:8px;"><i class="fas fa-trash me-1"></i>Remove</button></div>`;
   } else {
     // Session event
     const startTime = p.start_time || event.startStr;
@@ -2311,8 +2504,93 @@ function showNotifPanel(){
 //  LOGOUT
 // ════════════════════════════════════════════════════════
 function logoutUser(){
-  Swal.fire({title:'Logout?',icon:'question',showCancelButton:true,confirmButtonColor:'#E63946',background:'#fff',color:'#0D1B2A'})
-    .then(r=>{ if(r.isConfirmed) window.location.href='../auth/logout.php'; });
+  // Clear the session check interval to prevent it from running after logout
+  if (window.sessionCheckInterval) {
+    clearInterval(window.sessionCheckInterval);
+    window.sessionCheckInterval = null;
+  }
+  
+  Swal.fire({
+    title:'⚠️ Logout?',
+    html:`<div style="text-align:left;padding:12px 0;">
+      <div style="font-size:13px;color:var(--text-primary);margin-bottom:10px;">You will be signed out from this account.</div>
+      <div style="background:rgba(193,68,14,.08);border:1px solid rgba(193,68,14,.2);border-radius:8px;padding:10px;font-size:11px;color:var(--text-secondary);">
+        <div style="margin-bottom:4px;"><strong>After logout:</strong></div>
+        <ul style="margin:0;padding-left:18px;list-style:disc;">
+          <li>You will be redirected to the login page</li>
+          <li>Session will be terminated</li>
+          <li>All active monitoring will stop</li>
+        </ul>
+      </div>
+    </div>`,
+    icon:'warning',
+    showCancelButton:true,
+    confirmButtonColor:'#E63946',
+    confirmButtonText:'🚪 Logout',
+    cancelButtonText:'Cancel',
+    reverseButtons:true,
+    background:'#fff',
+    color:'#0D1B2A',
+    width:'420px',
+    didOpen: () => {
+      document.querySelector('.swal2-confirm').focus();
+    }
+  }).then(r=>{
+    if(r.isConfirmed){
+      // Disable all tabs and buttons before logout
+      disableAllTabsAndButtons();
+      // Show loading message
+      Swal.fire({
+        title:'Logging out...',
+        html:'<div style="text-align:center;padding:8px;">Please wait while we sign you out</div>',
+        icon:'info',
+        allowOutsideClick:false,
+        showConfirmButton:false,
+        didOpen: () => Swal.showLoading()
+      });
+      // Proceed with logout
+      setTimeout(() => {
+        window.location.href='../auth/logout.php';
+      }, 800);
+    }
+  });
+}
+
+// Disable all tabs and buttons to prevent user interaction after logout
+function disableAllTabsAndButtons(){
+  // Disable all nav items (tabs)
+  document.querySelectorAll('.nav-item').forEach(item => {
+    item.style.pointerEvents = 'none';
+    item.style.opacity = '0.5';
+    item.onclick = (e) => e.preventDefault();
+  });
+  
+  // Disable all buttons
+  document.querySelectorAll('button').forEach(btn => {
+    btn.disabled = true;
+    btn.style.opacity = '0.5';
+    btn.style.cursor = 'not-allowed';
+  });
+  
+  // Disable all input fields
+  document.querySelectorAll('input, textarea, select').forEach(input => {
+    input.disabled = true;
+    input.style.opacity = '0.5';
+    input.style.cursor = 'not-allowed';
+  });
+  
+  // Add overlay to prevent interaction
+  const overlay = document.createElement('div');
+  overlay.id = 'logoutOverlay';
+  overlay.style.cssText = `
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.3);
+    backdrop-filter: blur(4px);
+    z-index: 9990;
+    pointer-events: auto;
+  `;
+  document.body.appendChild(overlay);
 }
 
 // ════════════════════════════════════════════════════════

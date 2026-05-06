@@ -135,17 +135,50 @@ switch ($action) {
 
     // ── ESP8266 polls this to know targets / start status ─────
     case 'fetch_controls':
-        try {
-            // Validate scheduled sessions before fetching controls
-            // validateScheduledSessions($dbh); // Disabled: schedule now handled in sensor_api.php
-            
-            $row = $dbh->query(
-                "SELECT status, target_temp, target_humidity FROM drying_controls WHERE id=1"
-            )->fetch(PDO::FETCH_ASSOC);
-            sendResponse('success', 'Controls fetched.', $row);
-        } catch (Exception $e) {
-            sendResponse('error', 'Failed.');
-        }
+            try {
+                // Fetch controls and compute realtime relay states (server-side schedule)
+                $row = $dbh->query(
+                    "SELECT status, target_temp, target_humidity, start_time FROM drying_controls WHERE id=1"
+                )->fetch(PDO::FETCH_ASSOC);
+
+                $fan1 = 0; $fan2 = 0; $heater1 = 0; $heater2 = 0; $phase = 'Idle';
+
+                if ($row && isset($row['status']) && strtoupper($row['status']) === 'RUNNING' && !empty($row['start_time'])) {
+                    $startTs = strtotime($row['start_time']);
+                    $elapsed = time() - $startTs;
+
+                    // Fans run immediately while session is running
+                    $fan1 = $fan2 = 1;
+
+                    // Heaters: wait 2 minutes after start, then run 5min ON / 10min OFF repeating
+                    if ($elapsed < 120) {
+                        $heaterOn = 0;
+                        $phase = 'Preheat';
+                    } else {
+                        $heaterPhaseElapsed = $elapsed - 120;
+                        $cycle = 900; // 15 minutes
+                        $heaterOn = ($heaterPhaseElapsed % $cycle) < 300 ? 1 : 0; // first 5min ON
+                        $phase = $heaterOn ? 'Heating' : 'Cooldown';
+                    }
+
+                    $heater1 = $heater2 = $heaterOn;
+                }
+
+                $out = [
+                    'status' => $row['status'] ?? 'STOPPED',
+                    'target_temp' => floatval($row['target_temp'] ?? 0),
+                    'target_humidity' => floatval($row['target_humidity'] ?? 0),
+                    'fan1' => (int)$fan1,
+                    'fan2' => (int)$fan2,
+                    'heater1' => (int)$heater1,
+                    'heater2' => (int)$heater2,
+                    'phase' => $phase,
+                ];
+
+                sendResponse('success', 'Controls fetched.', $out);
+            } catch (Exception $e) {
+                sendResponse('error', 'Failed: ' . $e->getMessage());
+            }
         break;
 
     // ── Dashboard polls this for live gauge display ────────────

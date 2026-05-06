@@ -222,6 +222,10 @@ switch ($action) {
     case 'start_session':
         $set_temp = max(30, min(70, floatval($_POST['set_temp'] ?? 45)));
         $set_hum  = max(10, min(80, floatval($_POST['set_humidity'] ?? 25)));
+        $fish_count = intval($_POST['fish_count'] ?? 0);
+        if ($fish_count < 1) {
+            sendResponse('error', 'Fish count must be at least 1.');
+        }
         $min_duration_hours = (1 / 60); // 1 minute
         $duration_hours = floatval($_POST['duration_hours'] ?? 0);
         if ($duration_hours > 0) {
@@ -275,8 +279,8 @@ switch ($action) {
             // Use the proto_id from session/request, fallback to 1 if not set
             $session_proto_id = ($proto_id > 0) ? $proto_id : 1;
             
-            $stmt = $dbh->prepare("INSERT INTO drying_sessions (user_id,proto_id,schedule_id,set_temp,set_humidity,status,start_time,notes) VALUES(:uid,:pid,:sid,:t,:h,'Running',NOW(),:notes)");
-            $stmt->execute([':uid'=>$default_user_id,':pid'=>$session_proto_id,':sid'=>$schedule_id,':t'=>$set_temp,':h'=>$set_hum,':notes'=>$session_notes]);
+            $stmt = $dbh->prepare("INSERT INTO drying_sessions (user_id,proto_id,schedule_id,set_temp,set_humidity,fish_count,status,start_time,notes) VALUES(:uid,:pid,:sid,:t,:h,:fc,'Running',NOW(),:notes)");
+            $stmt->execute([':uid'=>$default_user_id,':pid'=>$session_proto_id,':sid'=>$schedule_id,':t'=>$set_temp,':h'=>$set_hum,':fc'=>$fish_count,':notes'=>$session_notes]);
             $session_id = $dbh->lastInsertId();
             // Sync drying_controls — clear any leftover cooldown
             $dbh->prepare("UPDATE drying_controls SET target_temp=:t,target_humidity=:h,status='RUNNING',start_time=NOW(),cooldown_until=NULL WHERE id=1")
@@ -285,6 +289,7 @@ switch ($action) {
                 'session_id'   => (int)$session_id,
                 'set_temp'     => $set_temp,
                 'set_humidity' => $set_hum,
+                'fish_count'   => $fish_count,
                 'duration_hours' => $duration_hours > 0 ? $duration_hours : null,
                 'status'       => 'Running'
             ]);
@@ -325,19 +330,19 @@ switch ($action) {
         $recorded_humidity = floatval($_POST['humidity'] ?? 0);
 
         // Keep live sensor cache fresh for dashboard idle/live readings.
-        $upsertLiveCache = function($phase, $fan1, $fan2) use ($dbh, $recorded_temp, $recorded_humidity) {
+        $upsertLiveCache = function($phase, $fan1, $fan2, $heater1 = 0, $heater2 = 0) use ($dbh, $recorded_temp, $recorded_humidity) {
             try {
                 $dbh->prepare(
                     "INSERT INTO live_sensor_cache
                      (id, temperature, humidity, fan1_state, fan2_state, heater1_state, heater2_state, exhaust_state, phase, timestamp)
-                     VALUES (1, :temp, :hum, :f1, :f2, 0, 0, 0, :phase, NOW())
+                     VALUES (1, :temp, :hum, :f1, :f2, :h1, :h2, 0, :phase, NOW())
                      ON DUPLICATE KEY UPDATE
                         temperature=:temp_u,
                         humidity=:hum_u,
                         fan1_state=:f1_u,
                         fan2_state=:f2_u,
-                        heater1_state=0,
-                        heater2_state=0,
+                        heater1_state=:h1_u,
+                        heater2_state=:h2_u,
                         exhaust_state=0,
                         phase=:phase_u,
                         timestamp=NOW()"
@@ -346,11 +351,15 @@ switch ($action) {
                     ':hum' => $recorded_humidity,
                     ':f1' => (int)$fan1,
                     ':f2' => (int)$fan2,
+                    ':h1' => (int)$heater1,
+                    ':h2' => (int)$heater2,
                     ':phase' => $phase,
                     ':temp_u' => $recorded_temp,
                     ':hum_u' => $recorded_humidity,
                     ':f1_u' => (int)$fan1,
                     ':f2_u' => (int)$fan2,
+                    ':h1_u' => (int)$heater1,
+                    ':h2_u' => (int)$heater2,
                     ':phase_u' => $phase,
                 ]);
             } catch (Exception $e) {
@@ -360,7 +369,7 @@ switch ($action) {
 
         // If session_id=0, this is idle state - just cache the sensor data
         if ($session_id <= 0) {
-            $upsertLiveCache('Idle', 0, 0);
+            $upsertLiveCache('Idle', 0, 0, 0, 0);
 
             // Log idle reading to drying_logs for live display
             try {
@@ -557,7 +566,29 @@ switch ($action) {
             ]);
         }
 
-        $upsertLiveCache($phase, $fan1_state, $fan2_state);
+        // Compute heater cycle based on controls.start_time: 2min delay, 5min ON / 10min OFF
+        $heater1_state = 0;
+        $heater2_state = 0;
+        try {
+            $ctrlRow = $dbh->query("SELECT start_time FROM drying_controls WHERE id=1 LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+            $start_time = $ctrlRow['start_time'] ?? null;
+            if ($start_time && $command !== 'COOLDOWN' && $phase !== 'Cooldown') {
+                $startTs = strtotime($start_time);
+                if ($startTs !== false) {
+                    $elapsed = time() - $startTs;
+                    if ($elapsed >= 120) {
+                        $heaterPhaseElapsed = $elapsed - 120;
+                        $cycle = 900;
+                        $heaterOn = ($heaterPhaseElapsed % $cycle) < 300 ? 1 : 0;
+                        $heater1_state = $heater2_state = (int)$heaterOn;
+                    }
+                }
+            }
+        } catch (Exception $e) {
+            // ignore
+        }
+
+        $upsertLiveCache($phase, $fan1_state, $fan2_state, $heater1_state, $heater2_state);
 
         // Fish ready check
         $recentLogs = $dbh->prepare("SELECT recorded_temp, recorded_humidity FROM drying_logs WHERE session_id=:sid ORDER BY timestamp DESC LIMIT 5");
@@ -579,6 +610,8 @@ switch ($action) {
             'phase'               => $phase,
             'fan1'                => $fan1_state,
             'fan2'                => $fan2_state,
+            'heater1'             => $heater1_state ?? 0,
+            'heater2'             => $heater2_state ?? 0,
             'temp'                => $recorded_temp,
             'humidity'            => $recorded_humidity,
             'auto_stopped'        => $auto_stopped,
@@ -853,6 +886,34 @@ switch ($action) {
             $log['duration_hours']     = $sessionDurationHours;
             $log['auto_started']       = $session['auto_started'] ? (int)$session['auto_started'] : 0;
 
+            // Merge the freshest relay states from live_sensor_cache so the dashboard
+            // can render individual fan/heater indicators instead of the collapsed log fields.
+            try {
+                $liveState = $dbh->query(
+                    "SELECT fan1_state, fan2_state, heater1_state, heater2_state, phase
+                     FROM live_sensor_cache
+                     WHERE id = 1
+                     LIMIT 1"
+                )->fetch(PDO::FETCH_ASSOC);
+                if ($liveState) {
+                    $log['fan1_state'] = (int)($liveState['fan1_state'] ?? $log['fan_state'] ?? 0);
+                    $log['fan2_state'] = (int)($liveState['fan2_state'] ?? $log['fan_state'] ?? 0);
+                    $log['heater1_state'] = (int)($liveState['heater1_state'] ?? $log['heater_state'] ?? 0);
+                    $log['heater2_state'] = (int)($liveState['heater2_state'] ?? $log['heater_state'] ?? 0);
+                    $log['phase'] = $liveState['phase'] ?? $log['phase'];
+                } else {
+                    $log['fan1_state'] = (int)($log['fan_state'] ?? 0);
+                    $log['fan2_state'] = (int)($log['fan_state'] ?? 0);
+                    $log['heater1_state'] = (int)($log['heater_state'] ?? 0);
+                    $log['heater2_state'] = (int)($log['heater_state'] ?? 0);
+                }
+            } catch (Exception $e) {
+                $log['fan1_state'] = (int)($log['fan_state'] ?? 0);
+                $log['fan2_state'] = (int)($log['fan_state'] ?? 0);
+                $log['heater1_state'] = (int)($log['heater_state'] ?? 0);
+                $log['heater2_state'] = (int)($log['heater_state'] ?? 0);
+            }
+
             // Fish-ready check
             $recentLogs = $dbh->prepare("SELECT recorded_temp, recorded_humidity FROM drying_logs WHERE session_id=:sid ORDER BY timestamp DESC LIMIT 5");
             $recentLogs->execute([':sid'=>$sid]);
@@ -1016,7 +1077,7 @@ switch ($action) {
                 }
             }
             
-            $sql = "SELECT ds.session_id, ds.start_time, ds.end_time, ds.set_temp, ds.set_humidity, ds.status, ds.schedule_id, ds.proto_id,
+            $sql = "SELECT ds.session_id, ds.start_time, ds.end_time, ds.set_temp, ds.set_humidity, ds.fish_count, ds.status, ds.schedule_id, ds.proto_id,
                     TIMEDIFF(COALESCE(ds.end_time,NOW()),ds.start_time) AS duration,
                     ROUND(AVG(dl.recorded_temp),2)     AS avg_temp,
                     ROUND(AVG(dl.recorded_humidity),2) AS avg_hum,

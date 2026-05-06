@@ -13,7 +13,7 @@ function validateScheduledSessions($dbh) {
         // Note: Using first active prototype since this is a single-device system
         $startCheck = $dbh->prepare("
             SELECT bs.id, bs.user_id, bs.title, bs.sched_date, bs.sched_time,
-                   bs.set_temp, bs.set_humidity, bs.duration_hours
+                   bs.set_temp, bs.set_humidity, bs.duration_hours, COALESCE(bs.fish_count, 0) AS fish_count
             FROM batch_schedules bs
             WHERE bs.status = 'Scheduled' 
             AND CONCAT(bs.sched_date, ' ', bs.sched_time) <= :now
@@ -105,14 +105,15 @@ function startScheduledSession($dbh, $schedule) {
         
         // 2. Create new session
         $sessionStmt = $dbh->prepare("
-            INSERT INTO drying_sessions (user_id, proto_id, set_temp, set_humidity, status, start_time, schedule_id)
-            VALUES (:uid, :pid, :temp, :hum, 'Running', NOW(), :sched_id)
+            INSERT INTO drying_sessions (user_id, proto_id, set_temp, set_humidity, fish_count, status, start_time, schedule_id)
+            VALUES (:uid, :pid, :temp, :hum, :fc, 'Running', NOW(), :sched_id)
         ");
         $sessionStmt->execute([
             ':uid' => $schedule['user_id'],
             ':pid' => $schedule['proto_id'] ?? null,
             ':temp' => $schedule['set_temp'],
             ':hum' => $schedule['set_humidity'],
+            ':fc' => (int)($schedule['fish_count'] ?? 0),
             ':sched_id' => $schedule['id']
         ]);
         

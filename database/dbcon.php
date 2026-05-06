@@ -20,6 +20,14 @@ try {
     // Alias — some files use $pdo, some use $dbh
     $pdo = $dbh;
 
+    // ── Ensure fish_count columns exist ──
+    try {
+        $dbh->exec("ALTER TABLE drying_sessions ADD COLUMN IF NOT EXISTS fish_count INT DEFAULT 0");
+        $dbh->exec("ALTER TABLE batch_schedules ADD COLUMN IF NOT EXISTS fish_count INT DEFAULT 0");
+    } catch (Exception $e) {
+        // Non-fatal if columns already exist
+    }
+
 } catch (PDOException $e) {
     header('Content-Type: application/json');
     http_response_code(500);

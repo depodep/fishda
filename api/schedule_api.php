@@ -114,6 +114,8 @@ switch ($action) {
         $sched_time  = $_POST['sched_time']  ?? '08:00'; // HH:MM
         $set_temp    = floatval($_POST['set_temp']  ?? 45);
         $set_hum     = floatval($_POST['set_hum']   ?? 25);
+        $fish_count  = intval($_POST['fish_count'] ?? 0);
+        if ($fish_count < 1) resp('error', 'Fish count must be at least 1.');
         $duration    = parseScheduleDurationHours($_POST['duration_hours'] ?? 2.0); // Default 2 hours
         $notes       = htmlspecialchars(trim($_POST['notes'] ?? ''));
         $sched_proto_id = intval($_POST['proto_id'] ?? $_GET['proto_id'] ?? $proto_id ?? 0);
@@ -137,9 +139,9 @@ switch ($action) {
             
             $stmt = $dbh->prepare(
                 "INSERT INTO batch_schedules
-                    (user_id, proto_id, title, sched_date, sched_time, set_temp, set_humidity, duration_hours, notes, status)
+                    (user_id, proto_id, title, sched_date, sched_time, set_temp, set_humidity, duration_hours, fish_count, notes, status)
                  VALUES
-                    (:uid, :pid, :title, :date, :time, :temp, :hum, :duration, :notes, 'Scheduled')"
+                    (:uid, :pid, :title, :date, :time, :temp, :hum, :duration, :fc, :notes, 'Scheduled')"
             );
             $stmt->execute([
                 ':uid'      => $user_id,
@@ -150,6 +152,7 @@ switch ($action) {
                 ':temp'     => $set_temp,
                 ':hum'      => $set_hum,
                 ':duration' => $duration,
+                ':fc'       => $fish_count,
                 ':notes'    => $notes,
             ]);
             resp('success', 'Prototype batch scheduled.', ['schedule_id' => $dbh->lastInsertId()]);
@@ -191,6 +194,8 @@ switch ($action) {
         $sched_time  = $_POST['sched_time'] ?? '08:00';
         $set_temp    = floatval($_POST['set_temp'] ?? 45);
         $set_hum     = floatval($_POST['set_hum'] ?? 25);
+        $fish_count  = intval($_POST['fish_count'] ?? 0);
+        if ($fish_count < 1) resp('error', 'Fish count must be at least 1.');
         $duration    = parseScheduleDurationHours($_POST['duration_hours'] ?? 2.0);
         $notes       = htmlspecialchars(trim($_POST['notes'] ?? ''));
         $sched_proto_id = intval($_POST['proto_id'] ?? $_GET['proto_id'] ?? $_SESSION['proto_id'] ?? $proto_id ?? 0);
@@ -214,7 +219,7 @@ switch ($action) {
             $where = $is_admin ? 'WHERE id=:sid' : 'WHERE id=:sid AND (user_id=:uid OR proto_id=:pid OR proto_id IS NULL)';
             $sql = "UPDATE batch_schedules
                     SET proto_id=:pid2, title=:title, sched_date=:date, sched_time=:time,
-                        set_temp=:temp, set_humidity=:hum, duration_hours=:duration, notes=:notes,
+                        set_temp=:temp, set_humidity=:hum, duration_hours=:duration, fish_count=:fc, notes=:notes,
                         status='Scheduled'
                     $where";
             $stmt = $dbh->prepare($sql);
@@ -227,6 +232,7 @@ switch ($action) {
                 ':temp'     => $set_temp,
                 ':hum'      => $set_hum,
                 ':duration' => $duration,
+                ':fc'       => $fish_count,
                 ':notes'    => $notes,
             ];
             if (!$is_admin) {
@@ -383,7 +389,7 @@ switch ($action) {
 
             $stmt = $dbh->prepare(
                 "SELECT bs.id, bs.title, bs.sched_date, bs.sched_time, 
-                        bs.set_temp, bs.set_humidity, bs.duration_hours, bs.notes, bs.status,
+                        bs.set_temp, bs.set_humidity, bs.fish_count, bs.duration_hours, bs.notes, bs.status,
                         CASE WHEN ds.session_id IS NOT NULL THEN 1 ELSE 0 END AS has_running_session,
                         CASE 
                             WHEN bs.status IN ('Done','Cancelled') THEN bs.status
